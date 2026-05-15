@@ -1,0 +1,54 @@
+_target_: robots.airbots.airbot_mmk.airbot_com_mmk2_bson.AIRBOTMMK2
+
+ip: "192.168.11.200"
+
+# NOTE: If you want to change the order of each part, be careful to change the order of each observation and action in the data conversion script simultaneously
+# components: ["left_arm", "right_arm", "head", "spine"]
+components: ["left_arm", "left_arm_eef", "right_arm", "right_arm_eef","head", "spine"]
+
+cameras: 
+  head_camera: ["color"]
+  # left_camera: ["color"]
+  # right_camera: ["color"]
+
+
+# # USB相机配置
+# usb_cameras:
+#   - position: "left"    # 相机位置标识
+#     device_path: "/dev/video3" 
+#     fps: 20             # 目标帧率
+    
+#   - position: "right"
+#     device_path: "/dev/video8" 
+#     fps: 20
+    
+#   # - position: "overhead"
+#   #   serial: "DEF456"
+#   #   fps: 20
+
+demonstrate: true
+
+default_action:
+  [
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    0.0,
+    
+    0.0,
+    0.0,
+    0.0,
+    -1.0,
+    0.15,
+  ]
+
+

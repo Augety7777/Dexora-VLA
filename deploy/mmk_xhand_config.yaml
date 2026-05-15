@@ -1,0 +1,31 @@
+# RDT MMK+xHand Inference Configuration
+
+# Camera configuration
+camera_names: ['head_camera', 'cam_left_wrist', 'cam_third_view', 'cam_right_wrist']
+ext_cam_ids: ["/dev/camera_left","/dev/camera_high","/dev/camera_right"]
+img_history_size: 1
+
+# Image parameters
+image_aspect_ratio: pad
+
+# Model parameters
+seed: 42
+state_dim: 36  # 6 DoF for each arm + 12 DoF for each hand
+chunk_size: 16  # Action chunk size for inference
+vision_encoder_name: "google/siglip-so400m-patch14-384"  # Vision encoder model name
+
+# Control parameters
+control_frequency: 20.0  # Control frequency in Hz
+use_actions_interpolation: false  # Whether to interpolate actions
+max_steps: 100000  # Maximum number of control steps
+
+# MMK+xHand parameters
+xhand_code_path: "/home/air/teleop_software_pkg"
+xhand_config: "/home/air/dexrdt/Dex-RDT/deploy/xhand_config.yaml"
+mmk_code_path: "/home/air/mmk_dev/Imitate-All"
+mmk_ip: "192.168.11.200"
+mmk_port: 50055
+# arm_steps_length: [0.05, 0.05, 0.05, 0.05, 0.05, 0.05]
+arm_steps_length: [0.01, 0.01, 0.01, 0.01, 0.01, 0.01]
+hand_steps_length: [0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1, 0.1]
+use_actions_interpolation: true

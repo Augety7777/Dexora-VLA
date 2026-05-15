@@ -1,0 +1,282 @@
+Finding episode directories...
+0 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+1 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+2 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+3 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+4 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+5 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+6 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+7 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+8 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+9 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+10 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+11 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+12 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+13 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+14 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+15 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+16 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+17 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+18 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+19 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+20 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+21 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+22 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+23 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+24 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+25 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+26 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+27 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+28 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+29 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+30 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+31 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+32 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+33 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+34 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+35 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+36 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+37 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+38 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+39 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+40 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+41 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+42 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+43 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+44 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+45 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+46 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+47 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+48 : Put the pink bowl into the blue bowl, then put the green bowl into the pink bowl
+49 : Put vegetables into the tray
+50 : Put vegetables into the tray
+51 : Put vegetables into the tray
+52 : Put vegetables into the tray
+53 : Put vegetables into the tray
+54 : Put vegetables into the tray
+55 : Put vegetables into the tray
+56 : Put vegetables into the tray
+57 : Put vegetables into the tray
+58 : Put vegetables into the tray
+59 : Put vegetables into the tray
+60 : Put vegetables into the tray
+61 : Put vegetables into the tray
+62 : Put vegetables into the tray
+63 : Put vegetables into the tray
+64 : Put vegetables into the tray
+65 : Put vegetables into the tray
+66 : Put vegetables into the tray
+67 : Put vegetables into the tray
+68 : Put vegetables into the tray
+69 : Put vegetables into the tray
+70 : Put vegetables into the tray
+71 : Put vegetables into the tray
+72 : Put vegetables into the tray
+73 : Put vegetables into the tray
+74 : Put vegetables into the tray
+75 : Put vegetables into the tray
+76 : Put vegetables into the tray
+77 : Put vegetables into the tray
+78 : Put vegetables into the tray
+79 : Put vegetables into the tray
+80 : Put vegetables into the tray
+81 : Put vegetables into the tray
+82 : Put vegetables into the tray
+83 : Put vegetables into the tray
+Warning: Missing required files in data/ours/action6/episode_25
+83 : Put vegetables into the tray
+84 : Put vegetables into the tray
+85 : Put vegetables into the tray
+86 : Put vegetables into the tray
+87 : Put vegetables into the tray
+88 : Put vegetables into the tray
+89 : Put vegetables into the tray
+90 : Put vegetables into the tray
+91 : Put vegetables into the tray
+92 : Put vegetables into the tray
+93 : Put vegetables into the tray
+94 : Put vegetables into the tray
+95 : Put vegetables into the tray
+96 : Put vegetables into the tray
+97 : Put vegetables into the tray
+98 : Stack bows together
+99 : Stack bows together
+100 : Stack bows together
+101 : Stack bows together
+102 : Stack bows together
+103 : Stack bows together
+104 : Stack bows together
+105 : Stack bows together
+106 : Stack bows together
+107 : Stack bows together
+108 : Stack bows together
+109 : Stack bows together
+110 : Stack bows together
+111 : Stack bows together
+112 : Stack bows together
+113 : Stack bows together
+114 : Stack bows together
+115 : Stack bows together
+116 : Stack bows together
+117 : Stack bows together
+118 : Stack bows together
+119 : Stack bows together
+120 : Stack bows together
+121 : Put vegetables into the tray
+122 : Put vegetables into the tray
+123 : Put vegetables into the tray
+124 : Put vegetables into the tray
+125 : Put vegetables into the tray
+126 : Put vegetables into the tray
+127 : Put vegetables into the tray
+128 : Put vegetables into the tray
+129 : Put vegetables into the tray
+130 : Put vegetables into the tray
+131 : Put vegetables into the tray
+132 : Put vegetables into the tray
+133 : Put vegetables into the tray
+134 : Put vegetables into the tray
+135 : Put vegetables into the tray
+136 : Put vegetables into the tray
+137 : Put vegetables into the tray
+138 : Put vegetables into the tray
+139 : Put vegetables into the tray
+140 : Put vegetables into the tray
+141 : Put vegetables into the tray
+142 : Put vegetables into the tray
+143 : Put vegetables into the tray
+144 : Put vegetables into the tray
+145 : Put vegetables into the tray
+146 : Put vegetables into the tray
+147 : Put vegetables into the tray
+148 : Put vegetables into the tray
+149 : Put vegetables into the tray
+150 : Put vegetables into the tray
+151 : Put vegetables into the tray
+152 : Put vegetables into the tray
+153 : Put vegetables into the tray
+154 : Put vegetables into the tray
+155 : Put vegetables into the tray
+156 : Put vegetables into the tray
+157 : Put vegetables into the tray
+158 : Put vegetables into the tray
+159 : Put vegetables into the tray
+160 : Put vegetables into the tray
+161 : Put vegetables into the tray
+162 : Put vegetables into the tray
+163 : Put vegetables into the tray
+164 : Put vegetables into the tray
+165 : Put vegetables into the tray
+166 : Put vegetables into the tray
+167 : Put vegetables into the tray
+168 : Put vegetables into the tray
+169 : Put vegetables into the tray
+170 : Put vegetables into the tray
+171 : Put the white bowl inside the pink bowl
+172 : Put the white bowl inside the pink bowl
+173 : Put the white bowl inside the pink bowl
+174 : Put the white bowl inside the pink bowl
+175 : Put the white bowl inside the pink bowl
+176 : Put the white bowl inside the pink bowl
+177 : Put the white bowl inside the pink bowl
+178 : Put the white bowl inside the pink bowl
+179 : Put the white bowl inside the pink bowl
+180 : Put the white bowl inside the pink bowl
+181 : Put the white bowl inside the pink bowl
+182 : Put the white bowl inside the pink bowl
+183 : Put the white bowl inside the pink bowl
+184 : Put the white bowl inside the pink bowl
+185 : Put the white bowl inside the pink bowl
+186 : Put the white bowl inside the pink bowl
+187 : Put the white bowl inside the pink bowl
+188 : Put the white bowl inside the pink bowl
+189 : Put the white bowl inside the pink bowl
+190 : Put the white bowl inside the pink bowl
+191 : Put the white bowl inside the pink bowl
+192 : Put the white bowl inside the pink bowl
+193 : Put the white bowl inside the pink bowl
+194 : Put the white bowl inside the pink bowl
+195 : Put the white bowl inside the pink bowl
+196 : Put the white bowl inside the pink bowl
+197 : Put the white bowl inside the pink bowl
+198 : Put the white bowl inside the pink bowl
+199 : Put the white bowl inside the pink bowl
+200 : Put pumpkin into big bow
+201 : Put pumpkin into big bow
+202 : Put pumpkin into big bow
+203 : Put pumpkin into big bow
+204 : Put pumpkin into big bow
+205 : Put pumpkin into big bow
+206 : Put pumpkin into big bow
+207 : Put pumpkin into big bow
+208 : Put pumpkin into big bow
+209 : Put pumpkin into big bow
+210 : Put pumpkin into big bow
+211 : Put pumpkin into big bow
+212 : Put pumpkin into big bow
+213 : Put pumpkin into big bow
+214 : Put pumpkin into big bow
+215 : Put pumpkin into big bow
+216 : Put pumpkin into big bow
+217 : Put pumpkin into big bow
+218 : Put pumpkin into big bow
+219 : Put pumpkin into big bow
+220 : Put pumpkin into big bow
+221 : Put pumpkin into big bow
+222 : Put pumpkin into big bow
+223 : Put pumpkin into big bow
+224 : Put pumpkin into big bow
+225 : Put pumpkin into big bow
+226 : Put pumpkin into big bow
+227 : Put pumpkin into big bow
+228 : Put pumpkin into big bow
+229 : Put pumpkin into big bow
+230 : Put pumpkin into big bow
+231 : Put pumpkin into big bow
+232 : Put the bread in the bowl
+233 : Put the bread in the bowl
+234 : Put the bread in the bowl
+235 : Put the bread in the bowl
+236 : Put the bread in the bowl
+237 : Put the bread in the bowl
+238 : Put the bread in the bowl
+239 : Put the bread in the bowl
+240 : Put the bread in the bowl
+241 : Put the bread in the bowl
+242 : Put the bread in the bowl
+243 : Put the bread in the bowl
+244 : Put the bread in the bowl
+245 : Put the bread in the bowl
+246 : Put the bread in the bowl
+247 : Put the bread in the bowl
+248 : Put the bread in the bowl
+249 : Put the bread in the bowl
+250 : Put the bread in the bowl
+251 : Put the bread in the bowl
+252 : Put the bread in the bowl
+253 : Put the bread in the bowl
+254 : Put the bread in the bowl
+255 : Put the bread in the bowl
+256 : Put the bread in the bowl
+257 : Put the bread in the bowl
+258 : Put the bread in the bowl
+259 : Put the bread in the bowl
+260 : Put the bread in the bowl
+261 : Put the bread in the bowl
+262 : Put the bread in the bowl
+263 : Put the bread in the bowl
+264 : Put the bread in the bowl
+265 : Put the bread in the bowl
+266 : Put the bread in the bowl
+267 : Put the bread in the bowl
+268 : Put the bread in the bowl
+269 : Put the bread in the bowl
+270 : Put the bread in the bowl
+271 : Put the bread in the bowl
+272 : Put the bread in the bowl
+273 : Put the bread in the bowl
+274 : Put the bread in the bowl
+275 : Put the bread in the bowl
+276 : Put the bread in the bowl
+277 : Put the bread in the bowl
+278 : Put the bread in the bowl

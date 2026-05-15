@@ -1,0 +1,10 @@
+usb_cameras:
+  - position: "left"
+    device_path: "/dev/video3"
+    fps: 20
+    resolution: [1280, 720]
+    
+  - position: "right"
+    device_path: "/dev/video8"
+    fps: 20
+    resolution: [1280, 720]
