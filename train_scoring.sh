@@ -49,7 +49,7 @@ accelerate launch main_scoring.py \
     --output_dir=$OUTPUT_DIR \
     --train_batch_size=16 \
     --gradient_accumulation_steps=2 \
-    --max_train_steps=5000 \
+    --max_train_steps=10000 \
     --checkpointing_period=2000 \
     --checkpoints_total_limit=20 \
     --lr_scheduler="constant" \

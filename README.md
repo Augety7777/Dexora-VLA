@@ -61,16 +61,53 @@ pip install -r requirements.txt
 
 Large assets are **not** included in this repo. Place them at the expected paths or update the configs.
 
-| Asset | Approx. Size | Default Path | Link |
-|---|---|---|---|
-| SigLIP-SO400M vision encoder | ~3.7 GB | `google/siglip-so400m-patch14-384/` | [HF: google/siglip-so400m-patch14-384](https://huggingface.co/google/siglip-so400m-patch14-384) |
-| T5-v1_1-xxl text encoder | ~44 GB | `google/t5-v1_1-xxl/` | [HF: google/t5-v1_1-xxl](https://huggingface.co/google/t5-v1_1-xxl) |
-| Dexora 400M policy ckpt | ~1.6 GB | `checkpoints/dexora-400m/` | *TBD — release link* |
-| Dexora discriminator ckpt | ~120 MB | `checkpoints/dexora-scoring/` | *TBD — release link* |
-| Sim corpus (100K traj, 6.5M frames) | ~XX GB | `data/sim/` | *TBD — release link* |
-| Real corpus (10K episodes, 3.2M frames) | ~XX GB | `data/real/` | *TBD — release link* |
+### Pretrained foundation encoders (third-party)
 
-> *TBD* slots will be filled when the data/checkpoint releases are public.
+| Asset | Approx. Size | Default Path | Source |
+|---|---|---|---|
+| SigLIP-SO400M vision encoder | ~3.7 GB | `google/siglip-so400m-patch14-384/` | [huggingface.co/google/siglip-so400m-patch14-384](https://huggingface.co/google/siglip-so400m-patch14-384) |
+| T5-v1.1-XXL text encoder | ~44 GB | `google/t5-v1_1-xxl/` | [huggingface.co/google/t5-v1_1-xxl](https://huggingface.co/google/t5-v1_1-xxl) |
+
+```bash
+# One-time download (≈ 48 GB total). Requires `huggingface-cli login` if rate-limited.
+huggingface-cli download google/siglip-so400m-patch14-384 \
+    --local-dir google/siglip-so400m-patch14-384 --local-dir-use-symlinks False
+huggingface-cli download google/t5-v1_1-xxl \
+    --local-dir google/t5-v1_1-xxl --local-dir-use-symlinks False
+```
+
+### Dexora checkpoints & data (this work)
+
+The official Dexora release is hosted on the project page; release links are published there as they become available:
+
+> **🌐 Project page (canonical index):** https://dexoravla.github.io
+
+| Asset | Approx. Size | Default Path | Status |
+|---|---|---|---|
+| Dexora 400M policy — Stage-1 (sim pretrain) | ~1.6 GB | `checkpoints/dexora-400m-pretrain/` | release pending — see project page |
+| Dexora 400M policy — Stage-3 (post-trained on real) | ~1.6 GB | `checkpoints/dexora-400m-posttrain/` | release pending — see project page |
+| Dexora discriminator (30M) | ~120 MB | `checkpoints/dexora-scoring/` | release pending — see project page |
+| Synthetic corpus (100K trajectories, 6.5M frames, 361 h) | ~700 GB | `data/sim/` | release pending — see project page |
+| Real corpus (10K episodes, 3.2M frames, 177.5 h, LIBERO-2.0 format) | ~3 TB | `data/real/` | release pending — see project page |
+
+When the official URLs go live we will replace the *release pending* rows with direct
+`huggingface.co/dexoravla/...` paths and `wget`-able mirror links.
+
+### Upstream tooling referenced by the paper
+
+The data-generation and benchmarking pieces of the pipeline rely on the following
+open-source projects:
+
+| Component | Used for | Link |
+|---|---|---|
+| LIBERO-2.0 | Real-data storage format | [github.com/Lifelong-Robot-Learning/LIBERO](https://github.com/Lifelong-Robot-Learning/LIBERO) |
+| DexMimicGen | Synthetic trajectory synthesis (Sec III-B) | [github.com/NVlabs/DexMimicGen](https://github.com/NVlabs/DexMimicGen) |
+| Objaverse / Objaverse-XL | Source of 3D assets for sim | [objaverse.allenai.org](https://objaverse.allenai.org/) |
+| Qwen2.5-VL | VLM-driven asset mining & physical-property assignment | [huggingface.co/Qwen/Qwen2.5-VL-72B-Instruct](https://huggingface.co/Qwen/Qwen2.5-VL-72B-Instruct) |
+| MuJoCo | Digital twin & replay-based post-validation | [mujoco.org](https://mujoco.org) |
+| LeRobot | Dataset loader / format reference | [github.com/huggingface/lerobot](https://github.com/huggingface/lerobot) |
+| RDT-1B | Architectural reference for the Diffusion-Transformer policy | [github.com/thu-ml/RoboticsDiffusionTransformer](https://github.com/thu-ml/RoboticsDiffusionTransformer) |
+| DWBC (Xu et al. ICML'22) | Score → weight mapping (Sec III-D, ref [41]) | [github.com/ryanxhr/DWBC](https://github.com/ryanxhr/DWBC) |
 
 ## Three-stage Training Recipe (Sec III-D)
 
@@ -134,13 +171,15 @@ python deploy/run_inference.py \
 
 ## Reproducing the Paper Numbers
 
-| Table | What to run |
-|---|---|
-| Tab. I — Basic tasks (12) | Stage-1 + Stage-3 on each task, 20 rollouts |
-| Tab. II — Dexterous tasks (6) | Same, on the 6 dexterous tasks |
-| Tab. III — Discriminator ablation | Run Stage-3 with `--use_discriminator_weight` and without; report S.R. + Acc + Jerk |
-| Fig. 10 — Data composition | Stage-3 with sim-only / sim+50%-real / sim+all-real |
-| Fig. 11 — Per-joint trajectories | Use `scripts/eval_action_curves.py` after rollouts |
+| Table / Figure | How to run | Knob |
+|---|---|---|
+| Tab. I — Basic tasks (12) | Stage-1 + Stage-3 on each task; 20 rollouts | default |
+| Tab. II — Dexterous tasks (6) | Same, on the 6 dexterous tasks | default |
+| Tab. III — Discriminator ablation | Run Stage-3 with **and** without the discriminator; report S.R. + Acc + Jerk | `--no_quality_weights` (vanilla baseline) |
+| Fig. 9, Tab. II EC rows — Cross-embodiment | Stage-3 ckpt + fine-tune under each EC config (see `configs/cross_embodiment/`) | `--config_path configs/cross_embodiment/{ec1_franka,ec2_aloha,ec3_g1_inspire}.yaml` |
+| Fig. 10 — Data composition | Stage-3 with sim-only / sim+50%-real / sim+all-real | `--real_data_fraction {0.0, 0.5, 1.0}` |
+| Fig. 11 — Per-joint trajectories | `scripts/eval_action_curves.py` after rollouts | — |
+| Smoothness metrics (Acc.↓ / Jerk↓) | `scripts/eval_smoothness.py rollouts/*.json --stats_file new_lerobot_stats/dataset_statistics.json` | — |
 
 ## Citing
 

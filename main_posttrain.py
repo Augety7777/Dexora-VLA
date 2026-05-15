@@ -25,8 +25,9 @@ def parse_args(input_args=None):
     # --- Stage-3 specific ---
     parser.add_argument("--stage1_ckpt", type=str, required=True,
                         help="Path to stage-1 policy checkpoint (directory or .bin/.pt).")
-    parser.add_argument("--scoring_ckpt", type=str, required=True,
-                        help="Path to stage-2 discriminator checkpoint.")
+    parser.add_argument("--scoring_ckpt", type=str, default=None,
+                        help="Path to stage-2 discriminator checkpoint. "
+                             "Required unless --no_quality_weights is set.")
     parser.add_argument("--dwbc_eta", type=float, default=0.5,
                         help="DWBC mapping eta (paper uses 0.5).")
     parser.add_argument("--dwbc_w_min", type=float, default=0.0,
@@ -35,6 +36,14 @@ def parse_args(input_args=None):
                         help="Upper clamp for per-sample weights.")
     parser.add_argument("--dwbc_warmup_steps", type=int, default=1000,
                         help="Linear weight warm-up: 0 means use w_i from step 0.")
+    parser.add_argument("--no_quality_weights", action="store_true",
+                        help="Disable discriminator weighting (ablation: 'vanilla post-training' "
+                             "row in Table III). Per-sample weights are fixed to 1.0.")
+    parser.add_argument("--real_data_fraction", type=float, default=1.0,
+                        help="Fraction of the real dataset to keep during post-training "
+                             "(ablation Fig. 10: 0.0 = sim-only, 0.5 = sim + 50%% real, "
+                             "1.0 = sim + all real). Implemented as a deterministic per-epoch "
+                             "stride on the LeRobot/BSON dataset's __len__.")
 
     # --- Dataset / batch ---
     parser.add_argument("--load_from", type=str, default="lerobot",
@@ -96,4 +105,9 @@ def parse_args(input_args=None):
 if __name__ == "__main__":
     logger = get_logger(__name__)
     args = parse_args()
+    if (not args.no_quality_weights) and (args.scoring_ckpt is None):
+        raise SystemExit(
+            "ERROR: --scoring_ckpt is required for data-quality-aware post-training. "
+            "Pass --no_quality_weights to run the vanilla ablation instead."
+        )
     train_posttrain(args, logger)

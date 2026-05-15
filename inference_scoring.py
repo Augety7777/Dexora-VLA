@@ -8,6 +8,8 @@ import yaml
 import numpy as np
 from pathlib import Path
 
+from PIL import Image
+
 from models.scoring_model import ScoringModelRunner
 from models.multimodal_encoder.siglip_encoder import SiglipVisionTower
 from models.multimodal_encoder.t5_encoder import T5Embedder
@@ -68,25 +70,60 @@ def parse_args():
         help="How to aggregate per-clip scores into a single d(τ) per episode "
              "(Dexora §III-C: K-sub-clip aggregation).",
     )
+    parser.add_argument(
+        "--pretrained_text_encoder_name_or_path",
+        type=str,
+        default="google/t5-v1_1-xxl",
+        help="Path or HF id of the T5 text encoder used at discriminator training time.",
+    )
+    parser.add_argument(
+        "--pretrained_vision_encoder_name_or_path",
+        type=str,
+        default="google/siglip-so400m-patch14-384",
+        help="Path or HF id of the SigLip vision encoder used at discriminator training time.",
+    )
+    parser.add_argument(
+        "--logpi_file",
+        type=str,
+        default=None,
+        help="Optional path to a JSON of precomputed log-pi values, as produced by compute_logpi.py.",
+    )
 
     return parser.parse_args()
 
 
 def main():
     args = parse_args()
-    
+
     # Load config
     with open(args.config_path, "r") as fp:
         config = yaml.safe_load(fp)
-    
+
     # Initialize model
     scoring_runner = ScoringModelRunner(config)
     scoring_runner.load_pretrained(args.model_path)
     model = scoring_runner.model
     model.eval()
-    
+
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model.to(device)
+
+    # Encoders to keep train/inference conditioning consistent.
+    # (The discriminator was trained with text+image features as the condition
+    # stream; running it with `lang_cond=img_cond=None` at inference is a strict
+    # distribution shift and would silently change behaviour.)
+    text_embedder = T5Embedder(
+        from_pretrained=args.pretrained_text_encoder_name_or_path,
+        model_max_length=config['dataset']['tokenizer_max_length'],
+        local_files_only=False,
+        device=device,
+    )
+    vision_encoder = SiglipVisionTower(
+        vision_tower=args.pretrained_vision_encoder_name_or_path,
+        args=None,
+        delay_load=False,
+    )
+    vision_encoder.vision_tower.to(device).eval()
     
     # Load dataset
     if args.load_from == "bson":
@@ -130,21 +167,93 @@ def main():
             if not batch_data:
                 continue
             
-            # Prepare batch tensors
-            states = torch.stack([torch.tensor(data['state'], dtype=torch.float32) for data in batch_data]).to(device)
-            actions = torch.stack([torch.tensor(data['actions'], dtype=torch.float32) for data in batch_data]).to(device)
-            
-            # Placeholder for logpi (zeros for now) - one value per data point
+            # Prepare batch tensors. Always feed the *last* proprio frame so
+            # the discriminator receives the same `state` shape it was trained
+            # with ([B, state_dim]).
+            states_full = torch.stack(
+                [torch.tensor(data['state'], dtype=torch.float32) for data in batch_data]
+            ).to(device)
+            if states_full.ndim == 3:
+                states = states_full[:, -1, :]
+            else:
+                states = states_full
+            actions = torch.stack(
+                [torch.tensor(data['actions'], dtype=torch.float32) for data in batch_data]
+            ).to(device)
             B = actions.shape[0]
+
+            # ---- Language conditioning ----
+            instructions = []
+            for data in batch_data:
+                instr = ""
+                if isinstance(data.get('meta'), dict):
+                    instr = data['meta'].get('instruction', '')
+                if not instr:
+                    instr = data.get('instruction', '')
+                instructions.append(instr or "")
+            tok = text_embedder.tokenizer(
+                instructions,
+                return_tensors="pt",
+                padding="longest",
+                truncation=True,
+                max_length=config['dataset']['tokenizer_max_length'],
+            )
+            input_ids = tok['input_ids'].to(device)
+            lang_attn_mask = tok['attention_mask'].to(device).bool()
+            lang_embeds = text_embedder.model(
+                input_ids=input_ids, attention_mask=lang_attn_mask
+            )["last_hidden_state"].detach()
+
+            # ---- Image conditioning ----
+            image_tensors = []
+            for data in batch_data:
+                if 'images' in data and isinstance(data['images'], list) and data['images']:
+                    # already preprocessed in dataset's loader
+                    image_tensors.append(torch.stack(
+                        [t if torch.is_tensor(t) else torch.from_numpy(t) for t in data['images']],
+                        dim=0,
+                    ))
+                else:
+                    # fall back to zeros: behaviour matches "missing camera" masking
+                    H = vision_encoder.image_processor.size["height"]
+                    W = vision_encoder.image_processor.size["width"]
+                    image_tensors.append(torch.zeros(
+                        config['common']['num_cameras'] * config['common']['img_history_size'],
+                        3, H, W,
+                    ))
+            images = torch.stack(image_tensors, dim=0).to(device).to(next(vision_encoder.vision_tower.parameters()).dtype)
+            B_, N, C_img, H_img, W_img = images.shape
+            image_embeds = vision_encoder(images.reshape(-1, C_img, H_img, W_img)).detach()
+            image_embeds = image_embeds.reshape(B_, -1, vision_encoder.hidden_size)
+
+            # ---- log-pi proxy ----
             logpi_chunk = torch.zeros(B, 1, device=device)
-            
-            # Forward pass
+            if args.logpi_file is not None:
+                # Best-effort lookup keyed by (episode, frame); falls back to zeros.
+                with open(args.logpi_file, 'r') as f_lp:
+                    logpi_dict = json.load(f_lp)
+                for k, data in enumerate(batch_data):
+                    ep = data.get('meta', {}).get('episode_idx',
+                          data.get('meta', {}).get('episode_id', None))
+                    fr = data.get('meta', {}).get('step_id', None)
+                    if ep is None or fr is None:
+                        continue
+                    ep_key = str(ep)
+                    entry = logpi_dict.get(ep_key)
+                    if isinstance(entry, dict):
+                        v = entry.get(str(fr))
+                        if v is not None:
+                            logpi_chunk[k, 0] = float(v)
+                    elif entry is not None:
+                        logpi_chunk[k, 0] = float(entry)
+
+            # ---- Forward pass with full conditioning ----
             scores = model(
                 state=states,
                 action_chunk=actions,
                 logpi_chunk=logpi_chunk,
-                lang_cond=None,  # Skip conditioning for now
-                img_cond=None
+                lang_cond=lang_embeds,
+                img_cond=image_embeds,
             )
             
             # Store results

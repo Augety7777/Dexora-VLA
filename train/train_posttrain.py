@@ -23,6 +23,7 @@ import logging
 import math
 import os
 from pathlib import Path
+from typing import Optional
 
 import diffusers
 import torch
@@ -192,12 +193,18 @@ def train_posttrain(args, logger):
     )
 
     # ---------------- Frozen discriminator ----------------
-    # Build a scoring-model config (mirroring configs/scoring.yaml if not present).
-    if "scoring" not in config["model"]:
-        config["model"]["scoring"] = {"hidden_size": 512, "depth": 12, "num_heads": 8}
-    scoring_runner = ScoringModelRunner(config)
-    _load_scoring_model(scoring_runner, args.scoring_ckpt, logger)
-    scoring_model: ScoringModel = scoring_runner.model
+    # Skipped when --no_quality_weights is passed (ablation: vanilla post-train).
+    scoring_model: Optional[ScoringModel] = None
+    if not getattr(args, "no_quality_weights", False):
+        # Build a scoring-model config (mirroring configs/scoring.yaml if not present).
+        if "scoring" not in config["model"]:
+            config["model"]["scoring"] = {"hidden_size": 512, "depth": 12, "num_heads": 8}
+        scoring_runner = ScoringModelRunner(config)
+        _load_scoring_model(scoring_runner, args.scoring_ckpt, logger)
+        scoring_model = scoring_runner.model
+    else:
+        logger.info("--no_quality_weights set: running VANILLA post-training "
+                    "(no discriminator, all w_i = 1).")
 
     def save_model_hook(models, weights, output_dir):
         if accelerator.is_main_process:
@@ -258,8 +265,32 @@ def train_posttrain(args, logger):
 
     data_collator = DataCollatorForVLAConsumerDataset(tokenizer)
 
+    # ---- Optional Fig.10-style data-composition ablation ----
+    # `--real_data_fraction 0.0` -> sim-only (no real samples used; require
+    # `--load_from=bson|lerobot` pointing at sim corpus). 0.5 / 1.0 reproduce
+    # the "Sim + 50% Real" / "Sim + All Real" rows of Fig. 10.
+    real_frac = float(getattr(args, "real_data_fraction", 1.0))
+    real_frac = max(0.0, min(real_frac, 1.0))
+    if real_frac < 1.0:
+        n_keep = max(1, int(round(len(train_dataset) * real_frac)))
+        # Deterministic stride keeps the subset balanced across episodes.
+        import torch.utils.data as tud
+        if n_keep == 0:
+            train_subset = tud.Subset(train_dataset, [])
+        else:
+            stride = max(1, len(train_dataset) // n_keep)
+            indices = list(range(0, len(train_dataset), stride))[:n_keep]
+            train_subset = tud.Subset(train_dataset, indices)
+        logger.info(
+            f"--real_data_fraction={real_frac}: using {len(train_subset)}/"
+            f"{len(train_dataset)} real samples for stage-3."
+        )
+        train_dataset_for_loader = train_subset
+    else:
+        train_dataset_for_loader = train_dataset
+
     train_dataloader = torch.utils.data.DataLoader(
-        train_dataset,
+        train_dataset_for_loader,
         batch_size=args.train_batch_size,
         shuffle=True,
         collate_fn=data_collator,
@@ -297,7 +328,8 @@ def train_posttrain(args, logger):
     )
 
     ema_rdt.to(accelerator.device, dtype=weight_dtype)
-    scoring_model.to(accelerator.device, dtype=weight_dtype)
+    if scoring_model is not None:
+        scoring_model.to(accelerator.device, dtype=weight_dtype)
     if text_encoder is not None:
         text_encoder.to(accelerator.device, dtype=weight_dtype)
     if vision_encoder is not None:
@@ -390,34 +422,40 @@ def train_posttrain(args, logger):
                         )["last_hidden_state"].detach()
                     )
 
-                # ---------- Discriminator scoring (frozen) ----------
-                with torch.no_grad():
-                    logpi_chunk = batch.get("logpi", None)
-                    if logpi_chunk is None:
-                        logpi_chunk = torch.zeros(B, 1, device=actions.device, dtype=weight_dtype)
-                    else:
-                        logpi_chunk = logpi_chunk.to(device=actions.device, dtype=weight_dtype)
-                        if logpi_chunk.ndim == 1:
-                            logpi_chunk = logpi_chunk.view(-1, 1)
-                        elif logpi_chunk.ndim > 2:
-                            logpi_chunk = logpi_chunk.view(logpi_chunk.shape[0], -1)[:, :1]
-                        logpi_chunk = torch.nan_to_num(logpi_chunk, nan=0.0, posinf=50.0, neginf=-50.0)
-                        logpi_chunk = torch.clamp(logpi_chunk, -50.0, 50.0)
-                    scores = scoring_model(
-                        state=states.squeeze(1),
-                        action_chunk=actions,
-                        logpi_chunk=logpi_chunk,
-                        lang_cond=text_embeds,
-                        img_cond=image_embeds,
+                # ---------- Discriminator scoring (frozen) or vanilla baseline ----------
+                if scoring_model is None:
+                    sample_weights = torch.ones(
+                        (actions.shape[0],), device=actions.device, dtype=weight_dtype,
                     )
-                    sample_weights = scores_to_train_weights(
-                        scores,
-                        eta=args.dwbc_eta,
-                        w_min=args.dwbc_w_min,
-                        w_max=args.dwbc_w_max,
-                        warmup_steps=args.dwbc_warmup_steps,
-                        global_step=global_step,
-                    ).view(-1)
+                    scores = None
+                else:
+                    with torch.no_grad():
+                        logpi_chunk = batch.get("logpi", None)
+                        if logpi_chunk is None:
+                            logpi_chunk = torch.zeros(B, 1, device=actions.device, dtype=weight_dtype)
+                        else:
+                            logpi_chunk = logpi_chunk.to(device=actions.device, dtype=weight_dtype)
+                            if logpi_chunk.ndim == 1:
+                                logpi_chunk = logpi_chunk.view(-1, 1)
+                            elif logpi_chunk.ndim > 2:
+                                logpi_chunk = logpi_chunk.view(logpi_chunk.shape[0], -1)[:, :1]
+                            logpi_chunk = torch.nan_to_num(logpi_chunk, nan=0.0, posinf=50.0, neginf=-50.0)
+                            logpi_chunk = torch.clamp(logpi_chunk, -50.0, 50.0)
+                        scores = scoring_model(
+                            state=states.squeeze(1),
+                            action_chunk=actions,
+                            logpi_chunk=logpi_chunk,
+                            lang_cond=text_embeds,
+                            img_cond=image_embeds,
+                        )
+                        sample_weights = scores_to_train_weights(
+                            scores,
+                            eta=args.dwbc_eta,
+                            w_min=args.dwbc_w_min,
+                            w_max=args.dwbc_w_max,
+                            warmup_steps=args.dwbc_warmup_steps,
+                            global_step=global_step,
+                        ).view(-1)
 
                 state_elem_mask = state_elem_mask.unsqueeze(1)
 
