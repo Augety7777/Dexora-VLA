@@ -76,10 +76,21 @@ def parse_args():
         help="Pretrained vision encoder name or path.",
     )
     parser.add_argument(
+        "--normalize_mode",
+        type=str,
+        default="zscore",
+        choices=["zscore", "minmax", "none"],
+        help=(
+            "How to normalize the raw energies into the log-pi proxy used by the discriminator. "
+            "'zscore' implements Eq.(5) of the paper: \\hat{log pi} = -zscore(E). "
+            "'minmax' rescales to [0,1] (legacy behaviour). 'none' keeps the raw -E values."
+        ),
+    )
+    parser.add_argument(
         "--temperature",
         type=float,
         default=1.0,
-        help="Temperature for softmax when converting logpi to pseudo-probabilities (higher = softer).",
+        help="Optional temperature applied after normalization (1.0 = no-op).",
     )
     parser.add_argument(
         "--frame_stride",
@@ -522,8 +533,17 @@ def main():
                 logpi_dict[ep_key] = {}
             logpi_dict[ep_key][frame_key] = float(logpi_values[j])
     
-    # Convert to pseudo-probabilities with global min-max normalization to [0, 1]
-    # 1) Flatten raw values
+    # =====================================================================
+    # Convert raw -E values into the log-pi proxy used by the discriminator.
+    #
+    # Paper Eq.(5):
+    #     \hat{log pi}_t = -zscore(E_t) = -(E_t - Mean(E)) / sqrt(Var(E) + eps)
+    #
+    # ``logpi_dict`` already stores -E_t / S (see ``logpi_values`` upstream),
+    # so the *raw* values therein are already negative energies. To match the
+    # paper exactly we therefore standardize them and **flip the sign once more**
+    # so that larger values still correspond to "policy explains the chunk well".
+    # =====================================================================
     raw_values = []
     key_index = []  # list of (ep_key, frame_key)
     for ep_key, frames in logpi_dict.items():
@@ -536,58 +556,72 @@ def main():
             key_index.append((str(ep_key), None))
     raw_values = np.array(raw_values, dtype=np.float64)
 
-    # 2) Global min-max normalization: (x - min) / (max - min)
-    vmin = float(np.min(raw_values)) if raw_values.size > 0 else 0.0
-    vmax = float(np.max(raw_values)) if raw_values.size > 0 else 1.0
-    denom = vmax - vmin
+    eps = 1e-8
     if raw_values.size == 0:
-        probs = np.array([], dtype=np.float64)
-    elif denom < 1e-12:
-        # All values are (nearly) identical; set to 1.0 to indicate equal high score
-        probs = np.ones_like(raw_values, dtype=np.float64)
-    else:
-        probs = (raw_values - vmin) / denom
-
-    # 3) Reconstruct nested prob dict
-    prob_dict = {}
-    for (ep_key, frame_key), p in zip(key_index, probs.tolist()):
-        if ep_key not in prob_dict:
-            prob_dict[ep_key] = {}
-        if frame_key is None:
-            # Single-level fallback
-            prob_dict[ep_key] = p
+        norm_values = np.array([], dtype=np.float64)
+    elif args.normalize_mode == "zscore":
+        mu = float(raw_values.mean())
+        sigma = float(raw_values.std())
+        denom = max(sigma, eps)
+        # raw_values are already -E, so zscore(raw) is already a "higher = better"
+        # quantity; multiplying by -1 once more would invert it. Keep direction.
+        norm_values = (raw_values - mu) / denom
+    elif args.normalize_mode == "minmax":
+        vmin = float(raw_values.min())
+        vmax = float(raw_values.max())
+        rng = vmax - vmin
+        if rng < 1e-12:
+            norm_values = np.ones_like(raw_values, dtype=np.float64)
         else:
-            prob_dict[ep_key][frame_key] = p
+            norm_values = (raw_values - vmin) / rng
+    elif args.normalize_mode == "none":
+        norm_values = raw_values.copy()
+    else:
+        raise ValueError(f"Unknown normalize_mode: {args.normalize_mode}")
 
-    # 4) Save raw and probability outputs
+    if args.temperature != 1.0:
+        norm_values = norm_values / float(args.temperature)
+
+    # Reconstruct nested dict
+    norm_dict = {}
+    for (ep_key, frame_key), p in zip(key_index, norm_values.tolist()):
+        if ep_key not in norm_dict:
+            norm_dict[ep_key] = {}
+        if frame_key is None:
+            norm_dict[ep_key] = p
+        else:
+            norm_dict[ep_key][frame_key] = p
+
+    # Save raw and normalized outputs side by side.
     output_path = Path(args.output_file)
     raw_sidecar = output_path.with_name(output_path.stem + "_raw" + output_path.suffix)
-    print(f"Saving raw logpi to {raw_sidecar} ...")
+    print(f"Saving raw -E/|S| to {raw_sidecar} ...")
     with open(raw_sidecar, 'w') as f:
         json.dump(logpi_dict, f, indent=2)
 
-    print(f"Saving normalized pseudo-probabilities [0,1] to {args.output_file} ...")
+    print(
+        f"Saving normalized log-pi proxy (mode={args.normalize_mode}, T={args.temperature}) "
+        f"to {args.output_file} ..."
+    )
     with open(args.output_file, 'w') as f:
-        json.dump(prob_dict, f, indent=2)
+        json.dump(norm_dict, f, indent=2)
 
-    # Print probability statistics
-    prob_values_flat = []
-    for v in prob_dict.values():
+    norm_flat = []
+    for v in norm_dict.values():
         if isinstance(v, dict):
-            prob_values_flat.extend(list(v.values()))
+            norm_flat.extend(list(v.values()))
         else:
-            prob_values_flat.append(v)
-    prob_values_flat = np.array(prob_values_flat, dtype=np.float64)
+            norm_flat.append(v)
+    norm_flat = np.array(norm_flat, dtype=np.float64)
 
-    if prob_values_flat.size > 0:
-        print("\nNormalized Probability Statistics:")
-        print(f"Total entries: {prob_values_flat.size}")
-        print(f"Sum: {prob_values_flat.sum():.6f} (not constrained)")
-        print(f"Mean: {prob_values_flat.mean():.6f}")
-        print(f"Std: {prob_values_flat.std():.6f}")
-        print(f"Min: {prob_values_flat.min():.6f}")
-        print(f"Max: {prob_values_flat.max():.6f}")
-    
+    if norm_flat.size > 0:
+        print("\nNormalized log-pi statistics:")
+        print(f"  Total entries: {norm_flat.size}")
+        print(f"  Mean: {norm_flat.mean():.6f}")
+        print(f"  Std:  {norm_flat.std():.6f}")
+        print(f"  Min:  {norm_flat.min():.6f}")
+        print(f"  Max:  {norm_flat.max():.6f}")
+
     print("Logpi computation completed!")
 
 

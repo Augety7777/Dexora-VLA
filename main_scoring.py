@@ -98,10 +98,14 @@ def parse_args(input_args=None):
         help="Initial learning rate (after the potential warmup period) to use.",
     )
     parser.add_argument(
-        "--pu_eta",
-        type=float,
-        default=0.1,
-        help="Weight parameter eta for PU learning loss function.",
+        "--pu_variant",
+        type=str,
+        default="paper",
+        choices=["paper", "dwbc"],
+        help=(
+            "PU discriminator loss variant. 'paper' = Dexora Eq.(7) "
+            "(two BCE terms; default); 'dwbc' = three-term DWBC form (Xu et al. ICML'22)."
+        ),
     )
     parser.add_argument(
         "--cond_mask_prob",
@@ -164,8 +168,20 @@ def parse_args(input_args=None):
         default=4,
         help="Number of subprocesses to use for data loading.",
     )
-    parser.add_argument("--eta", type=float, default=1.0, help="PU learning parameter eta")
-    parser.add_argument("--logpi_file", type=str, default="logpi_values.json", help="Path to precomputed logpi values file")
+    parser.add_argument(
+        "--eta",
+        type=float,
+        default=0.5,
+        help="PU learning weight eta on positives. Dexora paper uses 0.5 (Eq.(7)).",
+    )
+    parser.add_argument("--logpi_file", type=str, default="logpi_values.json",
+                        help="Path to precomputed logpi values file")
+    parser.add_argument("--spre_file", type=str,
+                        default="new_lerobot_jerk/complete_analysis_results.json",
+                        help="Path to the pre-screening JSON (Spre, output of analyze_episode_quality.py).")
+    parser.add_argument("--shigh_file", type=str, default=None,
+                        help="Optional Shigh JSON (output of replay_validate.py); "
+                             "when provided, positives come from Shigh instead of Spre.")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
     parser.add_argument("--adam_beta1", type=float, default=0.9, help="The beta1 parameter for the Adam optimizer.")
     parser.add_argument("--adam_beta2", type=float, default=0.999, help="The beta2 parameter for the Adam optimizer.")

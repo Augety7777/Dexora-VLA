@@ -60,7 +60,15 @@ def parse_args():
         default=1000,
         help="Number of samples to evaluate. -1 for all samples.",
     )
-    
+    parser.add_argument(
+        "--episode_aggregation",
+        type=str,
+        default="mean",
+        choices=["mean", "median", "min", "max"],
+        help="How to aggregate per-clip scores into a single d(τ) per episode "
+             "(Dexora §III-C: K-sub-clip aggregation).",
+    )
+
     return parser.parse_args()
 
 
@@ -200,10 +208,33 @@ def main():
         "non_expert_score_std": np.std(non_expert_scores) if non_expert_scores else 0.0,
     }
     
-    # Save results
+    # Aggregate to per-episode scores (Dexora §III-C: K sub-clip aggregation).
+    from collections import defaultdict
+    per_episode_scores = defaultdict(list)
+    for r in results:
+        if r["episode_id"] is not None:
+            per_episode_scores[r["episode_id"]].append(r["score"])
+    if args.episode_aggregation == "mean":
+        agg_fn = np.mean
+    elif args.episode_aggregation == "median":
+        agg_fn = np.median
+    elif args.episode_aggregation == "min":
+        agg_fn = np.min
+    elif args.episode_aggregation == "max":
+        agg_fn = np.max
+    else:  # pragma: no cover
+        raise ValueError(args.episode_aggregation)
+    episode_scores = {
+        int(ep): float(agg_fn(np.asarray(s, dtype=np.float64)))
+        for ep, s in per_episode_scores.items()
+    }
+    summary["episode_aggregation"] = args.episode_aggregation
+    summary["num_episodes_scored"] = len(episode_scores)
+
     output_data = {
         "summary": summary,
-        "detailed_results": results
+        "detailed_results": results,
+        "episode_scores": episode_scores,
     }
     
     with open(args.output_file, 'w') as f:

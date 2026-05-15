@@ -162,9 +162,11 @@ class RDTRunner(
         return noisy_action
     
     # ========= Train  ============
-    def compute_loss(self, lang_tokens, lang_attn_mask, img_tokens, 
-                     state_tokens, action_gt, action_mask, ctrl_freqs
-                    ) -> torch.Tensor:
+    def compute_loss(self, lang_tokens, lang_attn_mask, img_tokens,
+                     state_tokens, action_gt, action_mask, ctrl_freqs,
+                     sample_weights=None,
+                     return_dict: bool = False,
+                    ):
         '''
         lang_tokens: (batch_size, lang_len, lang_token_dim)
         lang_attn_mask: (batch_size, lang_len), a mask for valid language tokens,
@@ -174,11 +176,18 @@ class RDTRunner(
         action_gt: (batch_size, horizon, state_token_dim), ground-truth actions for supervision
         action_mask: (batch_size, 1, state_token_dim), a 0-1 **float** tensor.
         ctrl_freqs: (batch_size,), control frequency for each sample.
-        
-        return: loss_value, a scalar tensor
+        sample_weights: Optional (batch_size,) float tensor with per-sample
+            weights w_i. When provided, implements the Dexora data-quality-aware
+            objective (Eq.(8)):
+                L_pi = sum_i w_i * || eps_theta - eps ||^2  /  sum_i w_i
+            When None, falls back to the vanilla mean-MSE objective.
+        return_dict: If True, also return a dict with the unweighted MSE and
+            the average weight, useful for logging during post-training.
+
+        return: loss_value (scalar tensor) [, info_dict]
         '''
         batch_size = lang_tokens.shape[0]
-        device = lang_tokens.device  
+        device = lang_tokens.device
 
         # Sample noise that we'll add to the actions
         noise = torch.randn(
@@ -186,14 +195,14 @@ class RDTRunner(
         )
         # Sample random diffusion timesteps
         timesteps = torch.randint(
-            0, self.num_train_timesteps, 
+            0, self.num_train_timesteps,
             (batch_size,), device=device
         ).long()
         # Add noise to the clean actions according to the noise magnitude at each timestep
         # (this is the forward diffusion process)
         noisy_action = self.noise_scheduler.add_noise(
             action_gt, noise, timesteps)
-        
+
         # Concatenate the state and action tokens to form the input sequence
         state_action_traj = torch.cat([state_tokens, noisy_action], dim=1)
         # Append the action mask to the input sequence
@@ -203,11 +212,11 @@ class RDTRunner(
         lang_cond, img_cond, state_action_traj = self.adapt_conditions(
             lang_tokens, img_tokens, state_action_traj)
         # Predict the denoised result
-        pred = self.model(state_action_traj, ctrl_freqs, 
-                          timesteps, lang_cond, img_cond, 
+        pred = self.model(state_action_traj, ctrl_freqs,
+                          timesteps, lang_cond, img_cond,
                           lang_mask=lang_attn_mask)
 
-        pred_type = self.prediction_type 
+        pred_type = self.prediction_type
         if pred_type == 'epsilon':
             target = noise
         elif pred_type == 'sample':
@@ -215,7 +224,32 @@ class RDTRunner(
         else:
             raise ValueError(f"Unsupported prediction type {pred_type}")
 
-        loss = F.mse_loss(pred, target)
+        # Per-sample MSE then optionally weight by w_i.
+        diff_sq = (pred.float() - target.float()) ** 2  # [B, H, D]
+        per_sample_mse = diff_sq.mean(dim=tuple(range(1, diff_sq.ndim)))  # [B]
+
+        if sample_weights is None:
+            loss = per_sample_mse.mean()
+            mean_weight = pred.new_tensor(1.0)
+        else:
+            w = sample_weights.to(device=device, dtype=per_sample_mse.dtype).view(-1)
+            assert w.shape[0] == per_sample_mse.shape[0], (
+                f"sample_weights shape {tuple(w.shape)} does not match batch size {per_sample_mse.shape[0]}"
+            )
+            denom = w.sum().clamp_min(1e-6)
+            loss = (w * per_sample_mse).sum() / denom
+            mean_weight = w.mean().detach()
+
+        loss = loss.to(pred.dtype)
+
+        if return_dict:
+            info = {
+                "per_sample_mse_mean": per_sample_mse.mean().detach(),
+                "per_sample_mse_min": per_sample_mse.min().detach(),
+                "per_sample_mse_max": per_sample_mse.max().detach(),
+                "mean_weight": mean_weight,
+            }
+            return loss, info
         return loss
     
     # ========= Inference  ============

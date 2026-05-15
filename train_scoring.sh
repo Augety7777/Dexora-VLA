@@ -60,6 +60,7 @@ accelerate launch main_scoring.py \
     --state_noise_snr=40 \
     --load_from="lerobot" \
     --eta 0.5 \
+    --pu_variant paper \
     --logpi_file "new_lerobot_logpi_values.json" \
     --seed 42 \
     --report_to=wandb

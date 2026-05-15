@@ -11,10 +11,13 @@ class ScoringModel(nn.Module):
     """
     Scoring model that takes state, action chunks, and logpi as input
     and outputs a 0-1 score for episode quality assessment.
-    
-    Used for Positive-Unlabeled (PU) learning to distinguish expert vs non-expert episodes.
+
+    Used for Positive-Unlabeled (PU) learning to distinguish expert vs non-expert
+    episodes (Dexora §III-C). Tokens fed to the transformer follow the paper:
+        [s_t ; a_{t:t+L-1} ; \\hat{log pi}_t]
+    while language + multi-view image tokens form a separate condition stream.
     """
-    
+
     def __init__(
         self,
         state_dim=36,
@@ -25,35 +28,48 @@ class ScoringModel(nn.Module):
         num_heads=8,
         max_lang_cond_len=1024,
         img_cond_len=4096,
+        lang_token_dim=4096,
+        img_token_dim=1152,
         lang_pos_embed_config=None,
         img_pos_embed_config=None,
-        dtype=torch.bfloat16
+        dtype=torch.bfloat16,
     ):
         super().__init__()
-        
+
         self.state_dim = state_dim
         self.action_dim = action_dim
         self.action_chunk_size = action_chunk_size
         self.hidden_size = hidden_size
         self.max_lang_cond_len = max_lang_cond_len
         self.img_cond_len = img_cond_len
+        self.lang_token_dim = lang_token_dim
+        self.img_token_dim = img_token_dim
         self.dtype = dtype
         self.lang_pos_embed_config = lang_pos_embed_config
         self.img_pos_embed_config = img_pos_embed_config
-        
+
         # Input projections
         self.state_proj = nn.Linear(state_dim, hidden_size)
         self.action_proj = nn.Linear(action_dim, hidden_size)
-        # Use sinusoidal positional-style encoding for scalar logpi to enrich representation
-        # NOTE: High-frequency bands with bf16 can cause overflow -> NaNs.
-        # Use a smaller number of frequencies for stability.
+
+        # Sinusoidal positional-style encoding for scalar logpi.  High-frequency
+        # bands under bf16 can overflow -> NaNs, so we keep a modest count and
+        # run the trig in float32 inside _scalar_sincos_encoding.
         self.logpi_num_frequencies = 8
         self.logpi_include_input = True
         logpi_in_dim = (1 if self.logpi_include_input else 0) + 2 * self.logpi_num_frequencies
         self.logpi_proj = nn.Linear(logpi_in_dim, hidden_size)
-        # Lazy adapters for conditioning streams; created on first use
-        self.lang_proj = None
-        self.img_proj = None
+
+        # Conditioning-stream adapters are registered up front so they appear
+        # in `parameters()` and are picked up by Accelerator/DDP/optimizer.
+        self.lang_proj = (
+            nn.Linear(lang_token_dim, hidden_size, bias=False)
+            if lang_token_dim != hidden_size else nn.Identity()
+        )
+        self.img_proj = (
+            nn.Linear(img_token_dim, hidden_size, bias=False)
+            if img_token_dim != hidden_size else nn.Identity()
+        )
         
         # Positional embeddings
         # [state; action_chunk; logpi]
@@ -173,29 +189,30 @@ class ScoringModel(nn.Module):
         # Add positional embeddings
         x = x + self.pos_embed
         
-        # Prepare conditioning
+        # Prepare conditioning. The projectors are created eagerly in __init__
+        # so they participate in optimizer/DDP/accelerator.prepare().
         cond_tokens = []
         if lang_cond is not None:
-            # Project language cond to hidden_size if needed (e.g., T5-XXL 4096 -> hidden_size)
-            if lang_cond.shape[-1] != self.hidden_size:
-                if (self.lang_proj is None) or (self.lang_proj.in_features != lang_cond.shape[-1]):
-                    self.lang_proj = nn.Linear(lang_cond.shape[-1], self.hidden_size, bias=False)
-                    self.lang_proj.to(device=lang_cond.device, dtype=lang_cond.dtype)
-                lang_cond = self.lang_proj(lang_cond)
+            assert lang_cond.shape[-1] == self.lang_token_dim, (
+                f"lang_cond last dim {lang_cond.shape[-1]} != configured lang_token_dim {self.lang_token_dim}"
+            )
+            lang_cond = self.lang_proj(lang_cond)
             lang_cond = lang_cond + self.lang_cond_pos_embed[:, :lang_cond.shape[1]]
             cond_tokens.append(lang_cond)
-        
+
         if img_cond is not None:
-            # Project image cond to hidden_size if needed
-            if img_cond.shape[-1] != self.hidden_size:
-                if (self.img_proj is None) or (self.img_proj.in_features != img_cond.shape[-1]):
-                    self.img_proj = nn.Linear(img_cond.shape[-1], self.hidden_size, bias=False)
-                    self.img_proj.to(device=img_cond.device, dtype=img_cond.dtype)
-                img_cond = self.img_proj(img_cond)
+            assert img_cond.shape[-1] == self.img_token_dim, (
+                f"img_cond last dim {img_cond.shape[-1]} != configured img_token_dim {self.img_token_dim}"
+            )
+            img_cond = self.img_proj(img_cond)
             img_cond = img_cond + self.img_cond_pos_embed[:, :img_cond.shape[1]]
             cond_tokens.append(img_cond)
-        
-        cond = torch.cat(cond_tokens, dim=1)
+
+        if len(cond_tokens) == 0:
+            # Provide a minimal empty-cond tensor with the right shape so blocks can run.
+            cond = state.new_zeros((B, 0, self.hidden_size))
+        else:
+            cond = torch.cat(cond_tokens, dim=1)
         
         # Apply transformer blocks with conditioning
         for block in self.blocks:
@@ -244,11 +261,18 @@ class ScoringModel(nn.Module):
 
 class ScoringModelRunner:
     """
-    Runner class for the scoring model, similar to RDTRunner
+    Runner class for the scoring model, similar to RDTRunner.
     """
-    
+
     def __init__(self, config):
         self.config = config
+        # img_cond_len defaults to (img_history_size * num_cameras * 27 * 27)
+        # matching SigLip-SO400M at 384x384 (729 patches per view).
+        img_cond_len = (
+            config['common'].get('img_history_size', 1)
+            * config['common'].get('num_cameras', 4)
+            * config['common'].get('num_patches_per_view', 27 * 27)
+        )
         self.model = ScoringModel(
             state_dim=config['model']['state_token_dim'],
             action_dim=config['model']['state_token_dim'],  # Same as state_dim
@@ -257,8 +281,10 @@ class ScoringModelRunner:
             depth=config['model']['scoring']['depth'],
             num_heads=config['model']['scoring']['num_heads'],
             max_lang_cond_len=config['dataset']['tokenizer_max_length'],
-            img_cond_len=4096,  # Fixed for now
-            dtype=torch.bfloat16
+            img_cond_len=img_cond_len,
+            lang_token_dim=config['model'].get('lang_token_dim', 4096),
+            img_token_dim=config['model'].get('img_token_dim', 1152),
+            dtype=torch.bfloat16,
         )
     
     def save_pretrained(self, save_directory):
@@ -284,6 +310,59 @@ class ScoringModelRunner:
             # Directory with pytorch_model.bin
             model_file = os.path.join(model_path, "pytorch_model.bin")
             state_dict = torch.load(model_file, map_location="cpu")
-        
-        self.model.load_state_dict(state_dict)
+
+        # Tolerate optional wrappers from older training scripts.
+        if isinstance(state_dict, dict):
+            if "model_state_dict" in state_dict:
+                state_dict = state_dict["model_state_dict"]
+            elif "state_dict" in state_dict:
+                state_dict = state_dict["state_dict"]
+            elif "module" in state_dict and isinstance(state_dict["module"], dict):
+                state_dict = state_dict["module"]
+
+        missing, unexpected = self.model.load_state_dict(state_dict, strict=False)
+        if missing or unexpected:
+            print(f"[ScoringModelRunner] load_pretrained: missing={len(missing)} unexpected={len(unexpected)}")
         return self.model
+
+    @torch.no_grad()
+    def score_episode(
+        self,
+        clips,
+        device=None,
+        aggregation: str = "mean",
+    ):
+        """
+        Episode-level scoring by sub-clip aggregation (Dexora §III-C).
+
+        Args:
+            clips: A list of K dicts, each containing tensors for
+                {"state", "action_chunk", "logpi_chunk", "lang_cond", "img_cond"}.
+                Each tensor's leading dimension is **1** (single example per clip).
+            device: Optional device override.
+            aggregation: How to reduce per-clip scores to a single number.
+                One of {"mean", "median", "min", "max"}.
+
+        Returns:
+            A python float ``d(τ) ∈ (0, 1]`` plus the per-clip score tensor.
+        """
+        import torch
+        self.model.eval()
+        scores = []
+        for clip in clips:
+            kwargs = {k: v.to(device) if device is not None and torch.is_tensor(v) else v
+                      for k, v in clip.items()}
+            s = self.model(**kwargs)
+            scores.append(s.view(-1))
+        scores_t = torch.cat(scores, dim=0)
+        if aggregation == "mean":
+            agg = scores_t.mean()
+        elif aggregation == "median":
+            agg = scores_t.median()
+        elif aggregation == "min":
+            agg = scores_t.min()
+        elif aggregation == "max":
+            agg = scores_t.max()
+        else:
+            raise ValueError(f"Unknown aggregation: {aggregation}")
+        return float(agg.item()), scores_t

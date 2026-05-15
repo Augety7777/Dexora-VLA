@@ -7,6 +7,7 @@ import math
 import os
 import json
 from pathlib import Path
+from typing import Optional
 
 import diffusers
 import torch
@@ -40,17 +41,38 @@ class ScoringDataset(torch.utils.data.Dataset):
     """
     Dataset for scoring model training with PU learning.
     Wraps the original VLA dataset and adds episode quality labels.
+
+    The positive set comes from Shigh (paper §III-C) when ``shigh_file`` is
+    provided. Otherwise it falls back to Spre (the output of
+    ``analyze_episode_quality.py``) — useful for ablations and for users who
+    have not yet run ``replay_validate.py``.
     """
-    
-    def __init__(self, vla_dataset, valid_episodes_file="new_lerobot_jerk/complete_analysis_results.json"):
+
+    def __init__(
+        self,
+        vla_dataset,
+        valid_episodes_file: str = "new_lerobot_jerk/complete_analysis_results.json",
+        shigh_file: Optional[str] = None,
+    ):
         self.vla_dataset = vla_dataset
-        
-        # Load valid episodes from analysis results
-        with open(valid_episodes_file, 'r') as f:
-            analysis_results = json.load(f)
-        
-        self.valid_episodes = set(analysis_results["filtering_thresholds"]["valid_episodes"])
-        print(f"Loaded {len(self.valid_episodes)} valid episodes for PU learning")
+
+        if shigh_file is not None and os.path.exists(shigh_file):
+            with open(shigh_file, 'r') as f:
+                shigh_data = json.load(f)
+            self.valid_episodes = set(int(x) for x in shigh_data["shigh_episodes"])
+            print(
+                f"[ScoringDataset] Positives = Shigh from {shigh_file} "
+                f"({len(self.valid_episodes)} episodes)."
+            )
+        else:
+            with open(valid_episodes_file, 'r') as f:
+                analysis_results = json.load(f)
+            self.valid_episodes = set(int(x) for x in analysis_results["filtering_thresholds"]["valid_episodes"])
+            print(
+                f"[ScoringDataset] Positives = Spre from {valid_episodes_file} "
+                f"({len(self.valid_episodes)} episodes). "
+                "Consider running replay_validate.py to produce Shigh."
+            )
         
     def __len__(self):
         return len(self.vla_dataset)
@@ -96,62 +118,76 @@ class ScoringDataset(torch.utils.data.Dataset):
         return data
 
 
-def pu_loss_function(scores, is_expert, eta=0.1):
+def pu_loss_function(scores, is_expert, eta=0.5, variant="paper"):
     """
-    Positive-Unlabeled learning loss function:
-    Ld = η * E_{(s,a)~De}[-log d(s,a,logπ(a|s))] + 
-         E_{(s,a)~Do}[-log(1-d(s,a,logπ(a|s)))] - 
-         η * E_{(s,a)~De}[-log(1-d(s,a,logπ(a|s)))]
-    
+    Positive-Unlabeled discriminator loss.
+
+    Two supported variants:
+
+    * ``variant="paper"`` — Dexora paper Eq.(7):
+        L_D = eta * E_{Shigh}[-log d]  +  E_{U}[-log(1 - d)]
+      with ``eta = 0.5`` by default. This is the formulation the paper
+      explicitly writes down (two BCE terms, positives & unlabeled).
+
+    * ``variant="dwbc"`` — the original DWBC formulation of Xu et al. ICML'22
+      (ref. [41] in the paper):
+        L_D = eta * E_{Shigh}[-log d]
+            +       E_{U}[-log(1 - d)]
+            - eta * E_{Shigh}[-log(1 - d)]
+      The third subtractive term debiases the unlabeled term using the
+      positives. Empirically close to the paper variant when |Shigh| << |U|.
+
     Args:
-        scores: Model output scores [B, 1]
-        is_expert: Binary labels [B] (1 for expert, 0 for unlabeled)
-        eta: Weight for expert samples
-    
+        scores: Model output scores [B, 1] in (0, 1) (after sigmoid).
+        is_expert: Binary labels [B] (1.0 for positives in Shigh, 0.0 for U).
+        eta: PU weight (paper uses 0.5).
+        variant: "paper" (default) or "dwbc".
+
     Returns:
-        loss: PU learning loss
+        (loss, log_dict)
     """
     # Squeeze and upcast to float32 for numerically-stable logs under bf16
     scores = scores.squeeze(-1).to(dtype=torch.float32)  # [B]
-    
-    # Directly scale scores to [0.1, 0.9] to avoid saturation while preserving gradients
-    # s_safe = 0.1 + 0.8 * s
+
+    # Following the paper's "apply clip scores to d ∈ [0.1, 0.9] for stability"
+    # we re-scale the sigmoid output to that range so gradients never saturate.
     scores = 0.1 + 0.8 * scores
-    # Tiny guard to avoid exactly 0 or 1 after scaling due to numeric edge cases
     tiny = 1e-6
     scores = torch.clamp(scores, tiny, 1.0 - tiny)
-    
-    # Expert samples (De)
+
     expert_mask = is_expert == 1.0
-    expert_loss_pos = -torch.log(scores)                 # -log d(s,a)
-    expert_loss_neg = -torch.log1p(-scores)              # -log(1 - d(s,a))
-    
-    # Unlabeled samples (Do) 
     unlabeled_mask = is_expert == 0.0
-    unlabeled_loss = -torch.log1p(-scores)               # -log(1 - d(s,a))
-    
-    # Calculate PU loss components
-    if expert_mask.sum() > 0:
-        expert_pos_term = eta * expert_loss_pos[expert_mask].mean()
-        expert_neg_term = eta * expert_loss_neg[expert_mask].mean()
+
+    log_d = torch.log(scores)
+    log_1m_d = torch.log1p(-scores)
+
+    if expert_mask.any():
+        expert_pos_term = eta * (-log_d[expert_mask]).mean()
+        expert_neg_term = eta * (-log_1m_d[expert_mask]).mean()
     else:
-        expert_pos_term = torch.tensor(0.0, device=scores.device)
-        expert_neg_term = torch.tensor(0.0, device=scores.device)
-    
-    if unlabeled_mask.sum() > 0:
-        unlabeled_term = unlabeled_loss[unlabeled_mask].mean()
+        expert_pos_term = torch.zeros((), device=scores.device)
+        expert_neg_term = torch.zeros((), device=scores.device)
+
+    if unlabeled_mask.any():
+        unlabeled_term = (-log_1m_d[unlabeled_mask]).mean()
     else:
-        unlabeled_term = torch.tensor(0.0, device=scores.device)
-    
-    # Final PU loss
-    loss = expert_pos_term + unlabeled_term - expert_neg_term
-    
+        unlabeled_term = torch.zeros((), device=scores.device)
+
+    if variant == "paper":
+        loss = expert_pos_term + unlabeled_term
+    elif variant == "dwbc":
+        loss = expert_pos_term + unlabeled_term - expert_neg_term
+    else:
+        raise ValueError(f"Unknown PU variant: {variant!r}; expected 'paper' or 'dwbc'.")
+
     return loss, {
-        'expert_pos_term': expert_pos_term.item(),
-        'unlabeled_term': unlabeled_term.item(), 
-        'expert_neg_term': expert_neg_term.item(),
-        'num_expert': expert_mask.sum().item(),
-        'num_unlabeled': unlabeled_mask.sum().item()
+        'expert_pos_term': float(expert_pos_term.item()),
+        'unlabeled_term': float(unlabeled_term.item()),
+        'expert_neg_term': float(expert_neg_term.item()),
+        'num_expert': int(expert_mask.sum().item()),
+        'num_unlabeled': int(unlabeled_mask.sum().item()),
+        'variant': variant,
+        'eta': float(eta),
     }
 
 
@@ -268,8 +304,13 @@ def train_scoring_model(args, logger):
     else:
         raise ValueError(f"Unsupported dataset type: {args.load_from}")
     
-    # Wrap with scoring dataset
-    train_dataset = ScoringDataset(base_dataset)
+    # Wrap with scoring dataset; positives = Shigh if provided, else Spre.
+    train_dataset = ScoringDataset(
+        base_dataset,
+        valid_episodes_file=getattr(args, 'spre_file',
+                                    "new_lerobot_jerk/complete_analysis_results.json"),
+        shigh_file=getattr(args, 'shigh_file', None),
+    )
     
     # Create VLA consumer dataset for compatibility
     vla_dataset = VLAConsumerDataset(
@@ -461,8 +502,14 @@ def train_scoring_model(args, logger):
                     accelerator.print(f"[WARN] Non-finite scores detected at step {global_step}, replacing with 0.5. Count={bad.sum().item()}")
                     scores = torch.nan_to_num(scores, nan=0.5, posinf=1.0, neginf=0.0)
                 
-                # Calculate PU loss
-                loss, loss_components = pu_loss_function(scores, is_expert, eta=args.pu_eta)
+                # Calculate PU loss. We use the paper's Eq.(7) by default with eta=0.5.
+                # Users can switch to the original DWBC three-term form via --pu_variant dwbc.
+                loss, loss_components = pu_loss_function(
+                    scores,
+                    is_expert,
+                    eta=getattr(args, 'eta', 0.5),
+                    variant=getattr(args, 'pu_variant', 'paper'),
+                )
                 # If loss is non-finite, log diagnostics and skip this batch
                 if not torch.isfinite(loss):
                     with torch.no_grad():
