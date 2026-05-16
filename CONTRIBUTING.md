@@ -9,8 +9,8 @@ recipe ablations.
 ## Getting Set Up
 
 ```bash
-git clone https://github.com/dexoravla/Dexora.git
-cd Dexora
+git clone https://github.com/Augety7777/Dexora-VLA.git
+cd Dexora-VLA
 
 # Create an env (any flavour is fine; we test against 3.10/3.11)
 conda create -n dexora python=3.10 -y

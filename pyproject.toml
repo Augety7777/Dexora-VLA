@@ -70,8 +70,8 @@ dev = [
 
 [project.urls]
 Homepage = "https://dexoravla.github.io"
-Repository = "https://github.com/dexoravla/Dexora"
-Issues = "https://github.com/dexoravla/Dexora/issues"
+Repository = "https://github.com/Augety7777/Dexora-VLA"
+Issues = "https://github.com/Augety7777/Dexora-VLA/issues"
 Paper = "https://dexoravla.github.io"
 
 [project.scripts]

@@ -8,7 +8,7 @@ abstract: >-
   discriminator-guided data-quality-aware training recipe.
 type: software
 url: "https://dexoravla.github.io"
-repository-code: "https://github.com/dexoravla/Dexora"
+repository-code: "https://github.com/Augety7777/Dexora-VLA"
 license: MIT
 keywords:
   - vision-language-action
