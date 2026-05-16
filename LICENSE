@@ -1,6 +1,6 @@
 MIT License
 
-Copyright (c) 2024 TSAIL group
+Copyright (c) 2026 The Dexora Authors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal
@@ -19,3 +19,19 @@ AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
 LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
+
+================================================================================
+
+THIRD-PARTY NOTICES
+
+This repository builds on / re-uses code from several open-source projects.
+The original licenses of those components are preserved within their
+respective files / sub-directories:
+
+* RDT-1B (thu-ml/RoboticsDiffusionTransformer)   -- MIT
+* LeRobot (huggingface/lerobot, under lerobot/)  -- Apache-2.0
+* DiT / MAE / GLIDE references in models/rdt/    -- CC-BY-NC 4.0 (Meta)
+* SigLip (google/siglip-so400m-patch14-384)       -- Apache-2.0 (downloaded separately)
+* T5 (google/t5-v1_1-xxl)                         -- Apache-2.0 (downloaded separately)
+
+See the headers of individual source files for the exact attribution.

@@ -1,0 +1,205 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+# ---------------------------------------------------------------------------
+# Project metadata (PEP 621)
+# ---------------------------------------------------------------------------
+[project]
+name = "dexora"
+version = "0.1.0"
+description = "Dexora: Open-source VLA for High-DoF Bimanual Dexterity (ICRA 2026)"
+readme = "README.md"
+license = { text = "MIT" }
+requires-python = ">=3.10"
+authors = [
+    { name = "The Dexora Authors", email = "dev@dexoravla.github.io" },
+]
+keywords = [
+    "vision-language-action",
+    "imitation-learning",
+    "dexterous-manipulation",
+    "bimanual-manipulation",
+    "diffusion-transformer",
+    "robot-learning",
+]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+]
+dependencies = [
+    "packaging>=24.0",
+    "wandb>=0.17.0",
+    "accelerate>=0.30.0",
+    "diffusers>=0.27.0",
+    "timm>=1.0.0",
+    "transformers>=4.41.0",
+    "sentencepiece>=0.2.0",
+    "h5py>=3.11.0",
+    "opencv-python>=4.9.0",
+    "imgaug>=0.4.0",
+    "numpy<2.0",
+    "pymongo",
+    "av",
+    "pyyaml>=6.0",
+    "tqdm>=4.66",
+    "matplotlib>=3.7",
+    "Pillow>=10.0",
+    "safetensors>=0.4.0",
+    "huggingface-hub>=0.24.0",
+]
+
+[project.optional-dependencies]
+# CUDA / DeepSpeed components users may want to pin separately
+deepspeed = ["deepspeed==0.14.2"]
+# Anything required only for development / CI
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=4.1",
+    "ruff>=0.5.0",
+    "black>=24.4",
+    "pre-commit>=3.7",
+    "build>=1.2",
+]
+
+[project.urls]
+Homepage = "https://dexoravla.github.io"
+Repository = "https://github.com/dexoravla/Dexora"
+Issues = "https://github.com/dexoravla/Dexora/issues"
+Paper = "https://dexoravla.github.io"
+
+[project.scripts]
+dexora-train          = "main:main"
+dexora-train-scoring  = "main_scoring:main"
+dexora-posttrain      = "main_posttrain:main"
+
+# ---------------------------------------------------------------------------
+# Setuptools: this is a research repo, not a clean library. We install only
+# the Python packages we actually maintain, leaving scripts as top-level.
+# ---------------------------------------------------------------------------
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["models*", "train*", "data*", "scripts*", "tools*"]
+exclude = [
+    "lerobot*", "dataprocess*", "deploy*", "ref_*", "reference*",
+    "tests*", "assets*", "checkpoints*", "outs*",
+]
+
+# ---------------------------------------------------------------------------
+# Ruff: lint + import sorting + simple formatting checks
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 110
+target-version = "py310"
+extend-exclude = [
+    "lerobot",
+    "dataprocess",
+    "ref_collect_hand",
+    "ref_collect_mmk",
+    "ref_replay",
+    "_ref_collet",
+    "reference",
+    "deploy",
+    "data/preprocess_scripts",  # third-party preprocessing forks
+    "*/__pycache__",
+    "*.ipynb",
+]
+
+[tool.ruff.lint]
+# Stay deliberately small at first; this is a research repo with lots of
+# legacy code we do not want to gate the CI on. Expand once the dust settles.
+select = [
+    "E",   # pycodestyle errors
+    "F",   # pyflakes
+    "I",   # isort
+    "UP",  # pyupgrade
+    "B",   # flake8-bugbear
+    "SIM", # flake8-simplify
+]
+ignore = [
+    "E501",   # long lines (let black/ruff format handle it)
+    "B008",   # do not perform function calls in argument defaults (common in HF code)
+    "E402",   # module-level import not at top (sys.path inserts before imports)
+    "B905",   # zip() without strict=
+    "E741",   # ambiguous variable name (l, I, O) - common in math code
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["E501", "F401", "B011"]
+"__init__.py" = ["F401"]
+
+[tool.ruff.lint.isort]
+known-first-party = ["models", "train", "data", "scripts", "tools"]
+combine-as-imports = true
+
+# ---------------------------------------------------------------------------
+# Black
+# ---------------------------------------------------------------------------
+[tool.black]
+line-length = 110
+target-version = ["py310"]
+extend-exclude = """
+/(
+    lerobot
+  | dataprocess
+  | ref_collect_hand
+  | ref_collect_mmk
+  | ref_replay
+  | _ref_collet
+  | reference
+  | deploy
+  | data/preprocess_scripts
+)/
+"""
+
+# ---------------------------------------------------------------------------
+# pytest
+# ---------------------------------------------------------------------------
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+addopts = [
+    "-ra",
+    "--strict-config",
+    "--strict-markers",
+    "--showlocals",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning",
+    "ignore::UserWarning",
+]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "gpu: marks tests that need a GPU",
+]
+
+# ---------------------------------------------------------------------------
+# Coverage (used by pytest-cov)
+# ---------------------------------------------------------------------------
+[tool.coverage.run]
+branch = true
+source = ["models", "train", "scripts", "tools"]
+omit = [
+    "*/lerobot/*",
+    "*/dataprocess/*",
+    "*/reference/*",
+    "*/ref_*/*",
+    "*/_ref_collet/*",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]

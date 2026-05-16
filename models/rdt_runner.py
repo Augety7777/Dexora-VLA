@@ -10,6 +10,7 @@ from diffusers.schedulers.scheduling_dpmsolver_multistep import \
 
 from models.hub_mixin import CompatiblePyTorchModelHubMixin
 from models.rdt.model import RDT
+from models.sample_weighting import weighted_mse_loss
 
 
 class RDTRunner(
@@ -224,31 +225,11 @@ class RDTRunner(
         else:
             raise ValueError(f"Unsupported prediction type {pred_type}")
 
-        # Per-sample MSE then optionally weight by w_i.
-        diff_sq = (pred.float() - target.float()) ** 2  # [B, H, D]
-        per_sample_mse = diff_sq.mean(dim=tuple(range(1, diff_sq.ndim)))  # [B]
-
-        if sample_weights is None:
-            loss = per_sample_mse.mean()
-            mean_weight = pred.new_tensor(1.0)
-        else:
-            w = sample_weights.to(device=device, dtype=per_sample_mse.dtype).view(-1)
-            assert w.shape[0] == per_sample_mse.shape[0], (
-                f"sample_weights shape {tuple(w.shape)} does not match batch size {per_sample_mse.shape[0]}"
-            )
-            denom = w.sum().clamp_min(1e-6)
-            loss = (w * per_sample_mse).sum() / denom
-            mean_weight = w.mean().detach()
-
+        # Per-sample MSE + optional Eq.(8) weighting. See models/sample_weighting.py.
+        loss, info = weighted_mse_loss(pred, target, sample_weights=sample_weights)
         loss = loss.to(pred.dtype)
 
         if return_dict:
-            info = {
-                "per_sample_mse_mean": per_sample_mse.mean().detach(),
-                "per_sample_mse_min": per_sample_mse.min().detach(),
-                "per_sample_mse_max": per_sample_mse.max().detach(),
-                "mean_weight": mean_weight,
-            }
             return loss, info
         return loss
     

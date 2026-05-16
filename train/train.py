@@ -42,6 +42,34 @@ from train.dataset import DataCollatorForVLAConsumerDataset, VLAConsumerDataset
 from train.sample import log_sample_res
 
 
+def _dump_batch_probe(state, action, images, out_dir: str, global_step: int) -> None:
+    """Persist a quick visual + state/action probe for the first sample of a batch.
+
+    Used by ``train(...)`` when ``--probe_period > 0``. The probe writes one
+    JPG of all camera views plus a sidecar text file of the proprioceptive
+    state / action arrays so the user can sanity-check normalization and
+    image preprocessing without firing up TensorBoard.
+    """
+    os.makedirs(out_dir, exist_ok=True)
+    fig, axes = plt.subplots(1, images.shape[0], figsize=(images.shape[0] * 3, 3))
+    if images.shape[0] == 1:
+        axes = [axes]
+    for i, img in enumerate(images):
+        axes[i].imshow((img.cpu().permute(1, 2, 0).float() + 1) / 2)
+        axes[i].axis("off")
+    buf = io.BytesIO()
+    fig.savefig(buf, format="jpg", bbox_inches="tight")
+    buf.seek(0)
+    with open(os.path.join(out_dir, f"input_{global_step}.jpg"), "wb") as fh:
+        fh.write(buf.getvalue())
+    plt.close(fig)
+    with open(os.path.join(out_dir, f"sa_{global_step}.txt"), "w") as fh:
+        fh.write("state: ")
+        fh.write(str(state.to(torch.float32).cpu().numpy()))
+        fh.write("\naction: ")
+        fh.write(str(action.to(torch.float32).cpu().numpy()))
+
+
 if is_wandb_available():
     import wandb
 
@@ -405,43 +433,25 @@ def train(args, logger):
         for batch in train_dataloader:
             with accelerator.accumulate(rdt):
                 images = batch["images"].to(dtype=weight_dtype)
-                states = batch["states"].to(dtype=weight_dtype) # (B, T, D_a)
+                states = batch["states"].to(dtype=weight_dtype)  # (B, T, D_a)
                 # We only use the last state as input
                 states = states[:, -1:, :]
                 actions = batch["actions"].to(dtype=weight_dtype)
                 state_elem_mask = batch["state_elem_mask"].to(dtype=weight_dtype)
                 ctrl_freqs = batch["ctrl_freqs"]
-                # ==================== 探针代码 ====================
-                # 如果到了探针周期（例如每 args.probe_period 步）并且是主进程，就可视化原始图像
-                if global_step % 2 == 0 and accelerator.is_local_main_process and False:
-                    sample_state = states[0]
-                    sample_action = actions[0]
 
-                    # 只取 batch 中第一条样本的多视角图像序列
-                    sample_imgs = images[0]  # shape: (T, C, H, W)
-                    # 创建子图：一行 T 列
-                    fig, axes = plt.subplots(1, sample_imgs.shape[0], figsize=(sample_imgs.shape[0]*3, 3))
-                    for i, img in enumerate(sample_imgs):
-                        # CHW -> HWC and 转到 CPU
-                        axes[i].imshow((img.cpu().permute(1, 2, 0).float()+1)/2)
-                        axes[i].axis("off")
-                    # 保存到内存 buffer
-                    buf = io.BytesIO()
-                    fig.savefig(buf, format="jpg", bbox_inches="tight")
-                    buf.seek(0)
-                    # 根据不同的 logger 上传或写文件
-                    probe_dir = os.path.join(args.output_dir, "probe")
-                    os.makedirs(probe_dir, exist_ok=True)
-                    with open(os.path.join(probe_dir, f"input_{global_step}.jpg"), "wb") as f:
-                        f.write(buf.getvalue())
-                    plt.close(fig)
-                    with open(os.path.join(probe_dir, f"sa_{global_step}.txt"), "w") as f:
-                        f.write("state: ")
-                        f.write(str(sample_state.to(torch.float32).cpu().numpy()))
-                        f.write("\naction: ")
-                        f.write(str(sample_action.to(torch.float32).cpu().numpy()))
-                # ==================== 探针代码结束 ====================
-                    
+                if (
+                    args.probe_period > 0
+                    and global_step > 0
+                    and global_step % args.probe_period == 0
+                    and accelerator.is_local_main_process
+                ):
+                    _dump_batch_probe(
+                        states[0], actions[0], images[0],
+                        out_dir=os.path.join(args.output_dir, "probe"),
+                        global_step=global_step,
+                    )
+
                 with torch.no_grad():
                     batch_size, _, C, H, W = images.shape
                     image_embeds = vision_encoder(images.reshape(-1, C, H, W)).detach()

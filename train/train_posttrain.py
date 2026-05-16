@@ -18,7 +18,6 @@ side-by-side comparison and minimal duplication.
 """
 
 import copy
-import io
 import logging
 import math
 import os

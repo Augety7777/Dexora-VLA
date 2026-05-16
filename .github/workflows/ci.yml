@@ -1,0 +1,155 @@
+name: CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # Lint: ruff + black --check, fast.
+  # ---------------------------------------------------------------------------
+  lint:
+    name: Lint (ruff + black)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install lint deps
+        run: |
+          python -m pip install --upgrade pip
+          pip install "ruff>=0.5" "black>=24.4"
+
+      - name: Ruff
+        run: ruff check .
+
+      - name: Black --check
+        run: black --check .
+
+  # ---------------------------------------------------------------------------
+  # Unit tests: CPU-only, no heavy ML deps. Stays under a couple of minutes.
+  # ---------------------------------------------------------------------------
+  test:
+    name: Tests (Python ${{ matrix.python }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python: ["3.10", "3.11"]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python }}
+          cache: pip
+
+      - name: Install minimal test deps
+        run: |
+          python -m pip install --upgrade pip
+          # CPU-only torch is enough for the tests.
+          pip install --index-url https://download.pytorch.org/whl/cpu "torch>=2.1,<2.5"
+          pip install numpy pyyaml pytest pytest-cov
+
+      - name: Run pytest
+        run: pytest tests/ --cov --cov-report=term-missing
+
+  # ---------------------------------------------------------------------------
+  # Sanity: AST-parse every Python file under repository, plus YAML/JSON validity.
+  # ---------------------------------------------------------------------------
+  sanity:
+    name: Sanity (AST / YAML / JSON)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+          cache: pip
+
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install pyyaml
+
+      - name: Parse all Python files
+        run: |
+          python - <<'PY'
+          import ast, sys, pathlib
+          bad = []
+          skip_prefixes = (
+              "lerobot/", "dataprocess/", "_ref_collet/", "reference/",
+              "ref_collect_hand/", "ref_collect_mmk/", "ref_replay/",
+              "deploy/", "data/preprocess_scripts/",
+          )
+          for p in pathlib.Path(".").rglob("*.py"):
+              s = p.as_posix()
+              if any(s.startswith(pref) for pref in skip_prefixes):
+                  continue
+              try:
+                  ast.parse(p.read_text(), filename=s)
+              except SyntaxError as e:
+                  bad.append((s, str(e)))
+          if bad:
+              for f, m in bad:
+                  print(f"BAD: {f}: {m}")
+              sys.exit(1)
+          print("OK")
+          PY
+
+      - name: Validate YAML
+        run: |
+          python - <<'PY'
+          import yaml, sys, pathlib
+          bad = []
+          for p in pathlib.Path("configs").rglob("*.yaml"):
+              try:
+                  yaml.safe_load(p.read_text())
+              except yaml.YAMLError as e:
+                  bad.append((p.as_posix(), str(e)))
+          if bad:
+              for f, m in bad: print(f"BAD: {f}: {m}")
+              sys.exit(1)
+          print("OK")
+          PY
+
+      - name: Validate small JSONs
+        run: |
+          python - <<'PY'
+          import json, sys, pathlib
+          bad = []
+          for p in pathlib.Path(".").rglob("*.json"):
+              s = p.as_posix()
+              if any(s.startswith(x) for x in (
+                  "lerobot/", "node_modules/", "checkpoints/", "outs/",
+              )):
+                  continue
+              try:
+                  if p.stat().st_size > 25_000_000:
+                      continue
+                  json.loads(p.read_text())
+              except Exception as e:
+                  bad.append((s, str(e)))
+          if bad:
+              for f, m in bad: print(f"BAD: {f}: {m}")
+              sys.exit(1)
+          print("OK")
+          PY
+
+      - name: Release-readiness check
+        run: python tools/release_check.py --strict

@@ -274,11 +274,24 @@ def parse_args(input_args=None):
         ),
     )
 
-    parser.add_argument('--dataset_type', 
-        type=str, 
+    parser.add_argument('--dataset_type',
+        type=str,
         default="pretrain",
         required=False,
         help="Whether to load the pretrain dataset or finetune dataset."
+    )
+
+    parser.add_argument(
+        "--probe_period",
+        type=int,
+        default=0,
+        help=(
+            "If > 0, every N training steps the trainer dumps a JPG of the input "
+            "multi-view image batch and a text file with the raw state/action "
+            "tensor of the first sample under {output_dir}/probe/. Useful for "
+            "sanity-checking normalization, image augmentation, and camera "
+            "ordering. Default 0 disables probing."
+        ),
     )
 
     if input_args is not None:
@@ -293,7 +306,12 @@ def parse_args(input_args=None):
     return args
 
 
-if __name__ == "__main__":
+def main():
+    """CLI entry-point used by ``pyproject.toml``'s ``dexora-train`` script."""
     logger = get_logger(__name__)
     args = parse_args()
     train(args, logger)
+
+
+if __name__ == "__main__":
+    main()

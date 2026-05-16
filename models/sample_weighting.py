@@ -17,6 +17,9 @@ A short linear warm-up is applied during the first ``warmup_steps`` post-trainin
 steps. The warm-up interpolates each sample's weight between 1.0 and its
 DWBC-computed value, so the policy is initially trained with vanilla diffusion
 loss and gradually transitions to the quality-weighted objective.
+
+We also expose :func:`weighted_mse_loss`, the small reusable building block
+that implements Eq.(8) on top of any prediction / target tensors.
 """
 
 from __future__ import annotations
@@ -24,6 +27,13 @@ from __future__ import annotations
 from typing import Optional
 
 import torch
+
+__all__ = [
+    "dwbc_score_to_weight",
+    "warmup_weights",
+    "scores_to_train_weights",
+    "weighted_mse_loss",
+]
 
 
 def dwbc_score_to_weight(
@@ -100,3 +110,64 @@ def scores_to_train_weights(
     w = dwbc_score_to_weight(scores, eta=eta, w_min=w_min, w_max=w_max)
     w = warmup_weights(w, global_step=global_step, warmup_steps=warmup_steps)
     return w
+
+
+def weighted_mse_loss(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    sample_weights: Optional[torch.Tensor] = None,
+) -> tuple[torch.Tensor, dict[str, torch.Tensor]]:
+    """
+    Per-sample weighted MSE that implements Dexora Eq.(8).
+
+    Reduces over every non-batch axis to a per-sample scalar first, then
+    averages with optional per-sample weights:
+
+        per_sample_mse_i = mean_{>0}( (pred_i - target_i)^2 )
+        loss = sum_i (w_i * per_sample_mse_i) / sum_i w_i   (weighted)
+             = mean_i  per_sample_mse_i                     (unweighted)
+
+    Args:
+        pred:           ``(B, ...)`` model output (any shape with batch first).
+        target:         ``(B, ...)`` matching ground truth.
+        sample_weights: ``(B,)`` non-negative weights. If ``None``, behaves
+            exactly like ``F.mse_loss(pred, target)``.
+
+    Returns:
+        ``(loss, info)`` where ``info`` contains diagnostic tensors:
+          * ``per_sample_mse_mean / min / max``
+          * ``mean_weight``  (1.0 when ``sample_weights`` is None)
+    """
+    assert pred.shape == target.shape, (
+        f"pred / target shape mismatch: {tuple(pred.shape)} vs {tuple(target.shape)}"
+    )
+
+    diff_sq = (pred.float() - target.float()) ** 2  # (B, ...)
+    if diff_sq.ndim == 1:
+        per_sample_mse = diff_sq
+    else:
+        per_sample_mse = diff_sq.mean(dim=tuple(range(1, diff_sq.ndim)))  # (B,)
+
+    if sample_weights is None:
+        loss = per_sample_mse.mean()
+        mean_weight = per_sample_mse.new_ones(())
+    else:
+        w = sample_weights.to(
+            device=per_sample_mse.device, dtype=per_sample_mse.dtype
+        ).view(-1)
+        if w.shape[0] != per_sample_mse.shape[0]:
+            raise ValueError(
+                f"sample_weights shape {tuple(w.shape)} does not match batch "
+                f"size {per_sample_mse.shape[0]}"
+            )
+        denom = w.sum().clamp_min(1e-6)
+        loss = (w * per_sample_mse).sum() / denom
+        mean_weight = w.mean().detach()
+
+    info: dict[str, torch.Tensor] = {
+        "per_sample_mse_mean": per_sample_mse.mean().detach(),
+        "per_sample_mse_min": per_sample_mse.min().detach(),
+        "per_sample_mse_max": per_sample_mse.max().detach(),
+        "mean_weight": mean_weight,
+    }
+    return loss, info

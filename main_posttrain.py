@@ -102,7 +102,8 @@ def parse_args(input_args=None):
     return args
 
 
-if __name__ == "__main__":
+def main():
+    """CLI entry-point used by ``pyproject.toml``'s ``dexora-posttrain`` script."""
     logger = get_logger(__name__)
     args = parse_args()
     if (not args.no_quality_weights) and (args.scoring_ckpt is None):
@@ -111,3 +112,7 @@ if __name__ == "__main__":
             "Pass --no_quality_weights to run the vanilla ablation instead."
         )
     train_posttrain(args, logger)
+
+
+if __name__ == "__main__":
+    main()

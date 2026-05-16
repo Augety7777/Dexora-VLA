@@ -18,25 +18,49 @@ This repository contains the full **training**, **inference**, and **data-proces
 
 ```
 Dexora/
-├── configs/                # YAML configs (base.yaml: 1B; base_400m.yaml: paper spec)
-├── models/                 # RDT diffusion transformer + scoring (discriminator) model
-│   ├── rdt/                # Core RDT blocks
+├── configs/                # YAML configs
+│   ├── base.yaml           #   1B policy (legacy)
+│   ├── base_400m.yaml      #   400M paper spec (28 / 1024 / 16)
+│   ├── scoring.yaml        #   30M discriminator
+│   └── cross_embodiment/   #   EC-1 / EC-2 / EC-3 fine-tuning configs
+├── models/
+│   ├── rdt/                # Core diffusion-transformer blocks
 │   ├── rdt_runner.py       # Stage-1/3 policy (supports weighted MSE loss, Eq.(8))
-│   └── scoring_model.py    # Stage-2 discriminator (Eq.(7))
+│   ├── scoring_model.py    # Stage-2 discriminator (Eq.(7))
+│   └── sample_weighting.py # DWBC score → weight + Eq.(8) weighted MSE helper
 ├── train/
 │   ├── train.py            # Stage-1: pretrain on simulation data
 │   ├── train_scoring.py    # Stage-2: discriminator PU training
-│   └── train_posttrain.py  # Stage-3: quality-aware post-training (NEW)
+│   └── train_posttrain.py  # Stage-3: quality-aware post-training
 ├── data/                   # Dataset loaders (BSON, LeRobot, EgoDex, HDF5)
-├── dataprocess/            # Real / sim → LeRobot conversion scripts
-├── scripts/                # Eval & visualization
-├── deploy/                 # Real-robot deployment
-├── analyze_episode_quality.py  # Pre-screening (Aep + Jep, Sec III-C)
+├── scripts/                # Eval & visualization (eval_smoothness.py, ...)
+├── tools/
+│   ├── release_check.py    # Release-readiness sanity checks (used by CI)
+│   └── data/               # Internal data-ops scripts (see tools/data/README.md)
+├── tests/                  # CPU-only pytest suite (DWBC, PU loss, EC configs, ...)
+├── analyze_episode_quality.py  # Pre-screening (Aep + Jep, §III-C)
 ├── compute_logpi.py        # log-π proxy (Eq.(4)-(5))
-├── replay_validate.py      # Post-validation (Spre → Shigh, NEW)
-├── main.py / main_scoring.py / main_posttrain.py  # Entry-points
-├── train_ours.sh / train_scoring.sh / post_train.sh  # Launch scripts
+├── replay_validate.py      # Spre → Shigh post-validation
+├── main.py / main_scoring.py / main_posttrain.py    # Entry points
+├── train_ours.sh / train_scoring.sh / post_train.sh # Stage launch scripts
+├── run_all_stages.sh                                # End-to-end pipeline
+├── Makefile                                         # `make help` for the menu
+├── pyproject.toml + requirements{,-dev}.txt
+├── .github/workflows/ci.yml                         # ruff + pytest + sanity + release-check
+├── .pre-commit-config.yaml
+├── LICENSE  +  CITATION.cff  +  CONTRIBUTING.md  +  CODE_OF_CONDUCT.md
 └── ICRA26_0209_FI.pdf      # The paper
+```
+
+## Development quickstart
+
+```bash
+pip install -e ".[dev]"      # install runtime + dev deps (ruff, black, pytest, pre-commit)
+pre-commit install            # auto-run lint/format on each commit
+make test                     # 57 unit tests, ~3s, CPU-only
+make lint                     # ruff + black --check
+make release-check            # sanity: required files + README placeholders + script links
+make all-stages               # run the entire 3-stage pipeline end-to-end
 ```
 
 ---

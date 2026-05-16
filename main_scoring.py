@@ -247,7 +247,12 @@ def parse_args(input_args=None):
     return args
 
 
-if __name__ == "__main__":
+def main():
+    """CLI entry-point used by ``pyproject.toml``'s ``dexora-train-scoring`` script."""
     logger = get_logger(__name__)
     args = parse_args()
     train_scoring_model(args, logger)
+
+
+if __name__ == "__main__":
+    main()

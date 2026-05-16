@@ -36,6 +36,15 @@ from typing import Callable, Dict, List, Optional, Tuple
 import numpy as np
 from tqdm import tqdm
 
+__all__ = [
+    "VerifierResult",
+    "Verifier",
+    "trust_spre_verifier",
+    "energy_heuristic_verifier",
+    "mujoco_replay_verifier_factory",
+    "VERIFIER_REGISTRY",
+]
+
 # Optional dependency; only needed when reading LeRobot episodes for verifiers
 # that look at per-frame state/action.
 try:
