@@ -43,11 +43,55 @@ def parse_args(input_args=None):
     parser.add_argument(
         "--load_from",
         type=str,
-        default="hdf5",
+        default="lerobot",
         choices=["hdf5", "bson", "egodex", "lerobot"],
         help=(
-            "Type of dataset to load. "
-        )
+            "Dataset backend to load. The canonical Dexora workflow uses "
+            "``lerobot`` (the LeRobot v2.1 layout shipped on HuggingFace as "
+            "``Dexora/Dexora_Real-World_Dataset``). ``bson`` / ``hdf5`` / "
+            "``egodex`` are kept for legacy in-house data."
+        ),
+    )
+    parser.add_argument(
+        "--lerobot_root",
+        type=str,
+        default=None,
+        help=(
+            "Path to a LeRobot v2.1 dataset root (a directory containing "
+            "``meta/``, ``data/``, ``videos/`` subdirs). Required when "
+            "``--load_from=lerobot``. Example: "
+            "``data/Dexora_Real-World_Dataset/airbot_pick_and_place``."
+        ),
+    )
+    parser.add_argument(
+        "--bson_root",
+        type=str,
+        default=None,
+        help="Path to a BSON dataset root (legacy). Used when ``--load_from=bson``.",
+    )
+    parser.add_argument(
+        "--stats_file",
+        type=str,
+        default=None,
+        help=(
+            "Optional ``dataset_statistics.json`` for per-dim min-max "
+            "normalization. Generate with ``python -m data.lerobot_vla_dataset "
+            "--stat --repo_dir <lerobot_root>``. Defaults to the loader's "
+            "built-in default (``new_lerobot_stats/dataset_statistics.json``)."
+        ),
+    )
+    parser.add_argument(
+        "--state_dim_keep",
+        type=int,
+        default=36,
+        help=(
+            "Slice each frame's state/action vector to the first N dims. "
+            "Default 36 matches the paper's flat "
+            "[left_arm(6) | right_arm(6) | left_hand(12) | right_hand(12)] "
+            "layout. The HF release stores 39 dims (last 3 = head_joint_1, "
+            "head_joint_2, spine_joint, fixed by the AIRBOT SDK but not "
+            "modelled). Set to 0/None to keep all 39 dims."
+        ),
     )
     parser.add_argument(
         "--train_batch_size", type=int, default=4, help="Batch size (per device) for the training dataloader."

@@ -267,34 +267,34 @@ def train(args, logger):
     )
     
     # Dataset and DataLoaders creation:                                                           
-    train_dataset = VLAConsumerDataset(
+    dataset_common_kwargs = dict(
         config=config["dataset"],
         tokenizer=tokenizer,
         image_processor=image_processor,
         num_cameras=config["common"]["num_cameras"],
         img_history_size=config["common"]["img_history_size"],
         dataset_type=args.dataset_type,
+        use_hdf5=args.load_from,
+        use_precomp_lang_embed=args.precomp_lang_embed,
+        lerobot_root=getattr(args, "lerobot_root", None),
+        bson_root=getattr(args, "bson_root", None),
+        stats_file=getattr(args, "stats_file", None),
+        state_dim_keep=getattr(args, "state_dim_keep", 36),
+    )
+    train_dataset = VLAConsumerDataset(
         image_aug=args.image_aug,
         cond_mask_prob=args.cond_mask_prob,
         cam_ext_mask_prob=args.cam_ext_mask_prob,
         state_noise_snr=args.state_noise_snr,
-        use_hdf5=args.load_from,
-        use_precomp_lang_embed=args.precomp_lang_embed,
+        **dataset_common_kwargs,
     )
     sample_dataset = VLAConsumerDataset(
-        config=config["dataset"],
-        tokenizer=tokenizer,
-        image_processor=image_processor,
-        num_cameras=config["common"]["num_cameras"],
-        img_history_size=config["common"]["img_history_size"],
-        dataset_type=args.dataset_type,
         image_aug=False,
         cond_mask_prob=0,
         cam_ext_mask_prob=-1,
         state_noise_snr=None,
-        use_hdf5=args.load_from,
-        use_precomp_lang_embed=args.precomp_lang_embed,
-    )                              
+        **dataset_common_kwargs,
+    )
     
     data_collator = DataCollatorForVLAConsumerDataset(tokenizer)                                                        
     

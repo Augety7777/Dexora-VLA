@@ -1,8 +1,8 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
 """
-MMK Robot ZMQ Forwarder
-Runs in the MMK environment and forwards robot control/observation data via ZMQ
+MMK 机器人 ZMQ 转发器
+在 MMK 环境下运行，通过 ZMQ 转发机器人控制和观测数据
 """
 
 import argparse
@@ -11,82 +11,57 @@ import time
 import yaml
 import logging
 import json
+
+sys.path.append("/home/ubuntu/mmk_dev/Imitate-All/")
+
 import base64
 
 import numpy as np
 import cv2
 import zmq
 
-# MMK-specific imports will be added at runtime
+# MMK 相关模块在运行时动态导入
 # from robots.airbots.airbot_mmk.airbot_com_mmk2_bson import AIRBOTMMK2
 # from robots.airbots.airbot_mmk.airbot_com_mmk2 import AIRBOTMMK2Config
 
 
 class MMKForwarder:
-    """ZMQ forwarder for MMK robot communication"""
+    """MMK 机器人 ZMQ 通信转发器"""
     
     def __init__(self, config_path, zmq_port=5556):
-        # Load configuration
+        # 读取配置文件
         with open(config_path, 'r') as f:
             self.config = yaml.safe_load(f)
         
-        # ZMQ setup
+        # 初始化 ZMQ
         self.context = zmq.Context()
         self.socket = self.context.socket(zmq.REP)
         self.socket.bind(f"tcp://*:{zmq_port}")
-        logging.info(f"MMK forwarder listening on port {zmq_port}")
+        logging.info(f"MMK 转发器监听端口 {zmq_port}")
         
-        # Robot configuration
+        # 机器人配置参数
         self.ip = self.config["mmk_ip"]
         self.port = self.config["mmk_port"]
         self.mmk_code_path = self.config["mmk_code_path"]
         
-        # Camera configuration - only handle internal camera
+        # 相机配置，仅处理内部摄像头
         self.internal_camera_name = "head_camera"
         
-        # Component configuration
+        # 组件列表
         self.components = ["left_arm", "right_arm", "head", "spine"]
         self.robot_cameras = {"head_camera": ["color"]}
         
-        # Default action
-        self.default_action = [
-            # 0.4236286, -1.032845, 1.2422751, -2.5511177, 0.71126115, -2.5350957,
-            # -0.01544976, -0.0032425423, 0.0020981156, -0.014686809, -0.11692225, -0.01544976,
-            
-
-            # 100_0_0
-            # 0.37,-0.66,0.65,0.06,-0.30,0.99,
-            # -0.27,-0.83,1.01,-0.91,1.09,-0.51,
-            #15_10
-            0.54,-0.69,1.14,1.36,-0.77,0.12,
-            -0.29,-1.23,1.25,-0.92,0.76,-0.40,
-            #21_20
-            #1.27,-0.69,1.05,-0.01,-1.64,0.57,
-            #-0.89,-0.59,0.81,-0.15,0.96,-1.03,
-            #27_0
-            # 0.738,-0.718,0.933,0.332,-0.788,0.63,
-            # -0.36,-0.485,0.607,-0.578,0.219,-1.08,
-            #37_10 不好
-            # 0.41,-0.55,0.67,0.24,-0.45,0.95,
-            # -1.62,-0.6,0.75,-2.97,-1.46,2.67,
-            #37_20
-            # 0.59,-0.59,0.72,0.34,-0.63,0.63,
-            # -1.54,-0.69,0.74,-2.97,-1.45,2.76,
-            #39_10
-            # 1.32,-0.8,0.98,-0.3,-1.37,0.71,
-            # -1.2,-0.8,1.0,-0.07,1.27,-0.42,
-            #40_0
-            # 1.22,-0.9,0.99,-0.77,-1.27,1.38,
-            # -0.81,-0.8,1.11,0.21,0.6,-1.02,
+        # 默认位置
+        self.default_action = [0.3236820101737976, -1.0759518146514893, 1.6138323545455933, 2.174982786178589, -1.2834744453430176, -0.9786755442619324,-0.5533303022384644, -0.6879911422729492, 1.0378042459487915, -0.9946975111961365, 0.8146410584449768, 0.06351567804813385,
             0.0, -1.0,
             0.15
         ]
         
-        # Initialize robot only
+        # 只初始化机器人
         self._initialize_robot()
     
     def _initialize_robot(self):
-        """Initialize the MMK robot"""
+        """初始化 MMK 机器人"""
         sys.path.append(self.mmk_code_path)
         from robots.airbots.airbot_mmk.airbot_com_mmk2_bson import AIRBOTMMK2
         from robots.airbots.airbot_mmk.airbot_com_mmk2 import AIRBOTMMK2Config
@@ -101,45 +76,82 @@ class MMKForwarder:
         
         self.robot = AIRBOTMMK2(config=config)
         self.robot.reset(sleep_time=2)
-        logging.info(f"Successfully connected to MMK robot at {self.ip}")
+        logging.info(f"成功连接 MMK 机器人 {self.ip}")
     
     def get_observations(self):
-        """Get current robot state and internal camera observation"""
-        # Get robot state
+        """获取当前机器人状态"""
         robot_state_data = self.robot.get_low_dim_data()
         
-        # Process joint positions
+        # 获取关节位置
         left_joint_data = robot_state_data["/observation/left_arm/joint_state"]["data"]["pos"]
         right_joint_data = robot_state_data["/observation/right_arm/joint_state"]["data"]["pos"]
         
         qpos = np.array(left_joint_data + right_joint_data)
         
-        # # Get internal camera image only
-        # head_camera_image = self.robot._capture_images()[0][self.internal_camera_name]
-        
-        # # Encode image as base64 for transmission
-        # _, buffer = cv2.imencode('.jpg', head_camera_image)
-        # encoded_image = base64.b64encode(buffer).decode('utf-8')
-        
         return {
             'qpos': qpos.tolist(),
-            # 'head_camera_image': encoded_image
         }
     
     def execute_action(self, action):
-        """Execute action on MMK robot"""
-        # Execute actions
-        self.robot.send_action(action + self.default_action[-3:])
+        """让 MMK 机器人执行动作"""
+        # 关节限位
+        # J1: [-π, 2π/3]
+        # J2: [-17π/18, π/18]
+        # J3: [-π/36, π]
+        # J4: [-17π/18, 17π/18]
+        # J5: [-5π/9, 5π/9]
+        # J6: [-17π/18, 17π/18]
         
-        return {'status': 'success'}
+        # 每个关节的范围（左右相同）
+        joint_limits = np.array([
+            [-np.pi, 2 * np.pi / 3],              # J1
+            [-17 * np.pi / 18, np.pi / 18],       # J2
+            [-np.pi / 36, np.pi],                 # J3
+            [-17 * np.pi / 18, 17 * np.pi / 18],  # J4
+            [-5 * np.pi / 9, 5 * np.pi / 9],      # J5
+            [-17 * np.pi / 18, 17 * np.pi / 18]   # J6
+        ])
+        
+        action_array = np.array(action)
+        
+        # 动作维度检测
+        if len(action_array) != 12:
+            logging.warning(f"动作维度不符: 应为12，实际为 {len(action_array)}")
+            return {'status': 'error', 'message': f'无效的动作维度: {len(action_array)}'}
+        
+        # 左臂限位
+        left_arm = action_array[:6]
+        left_arm_clamped = np.clip(left_arm, joint_limits[:, 0], joint_limits[:, 1])
+        
+        # 右臂限位
+        right_arm = action_array[6:12]
+        right_arm_clamped = np.clip(right_arm, joint_limits[:, 0], joint_limits[:, 1])
+        
+        # 是否有超出关节范围
+        if not np.allclose(left_arm, left_arm_clamped) or not np.allclose(right_arm, right_arm_clamped):
+            logging.warning(f"动作超限，已裁剪: {action_array.tolist()}")
+        
+        clamped_action = np.concatenate([left_arm_clamped, right_arm_clamped]).tolist()
+        
+        # 拼接三维夹爪数据
+        full_action = clamped_action + self.default_action[-3:]
+        # DEBUG 日志降低 IO，减少控制延迟
+        logging.debug(f"[MMK EXECUTE] 发送动作 (15维): {full_action}")
+        try:
+            result = self.robot.send_action(full_action)
+            logging.debug(f"[MMK RESULT] send_action 返回: {result}")
+            return {'status': 'success', 'send_result': str(result)}
+        except Exception as e:
+            logging.error(f"[MMK ERROR] 发送动作失败: {e}")
+            return {'status': 'error', 'message': str(e)}
     
     def reset(self):
-        """Reset the robot"""
+        """复位机器人"""
         self.robot.reset(sleep_time=2)
         return {'status': 'success'}
     
     def handle_request(self, request):
-        """Handle incoming ZMQ request"""
+        """处理 ZMQ 请求"""
         command = request.get('command')
         
         if command == 'get_observations':
@@ -153,60 +165,60 @@ class MMKForwarder:
             return self.reset()
         
         else:
-            return {'error': f'Unknown command: {command}'}
+            return {'error': f'未知命令: {command}'}
     
     def run(self):
-        """Main loop for handling requests"""
-        logging.info("MMK forwarder started")
+        """循环处理请求"""
+        logging.info("MMK 转发器已启动")
         
         try:
             while True:
-                # Wait for request
+                # 等待请求
                 message = self.socket.recv_json()
-                logging.debug(f"Received request: {message.get('command')}")
+                logging.debug(f"收到请求: {message.get('command')}")
                 
-                # Process request
+                # 处理请求
                 try:
                     response = self.handle_request(message)
                 except Exception as e:
-                    logging.error(f"Error handling request: {e}")
+                    logging.error(f"处理请求出错: {e}")
                     import traceback
                     traceback.print_exc()
                     response = {'error': str(e)}
                 
-                # Send response
+                # 响应发送回客户端
                 self.socket.send_json(response)
                 
         except KeyboardInterrupt:
-            logging.info("Shutting down MMK forwarder...")
+            logging.info("MMK 转发器关闭中...")
         finally:
             self.cleanup()
     
     def cleanup(self):
-        """Clean up resources"""
-        # Close ZMQ socket
+        """释放资源"""
+        # 关闭 ZMQ
         self.socket.close()
         self.context.term()
 
 
 def main():
-    parser = argparse.ArgumentParser(description="MMK Robot ZMQ Forwarder")
-    parser.add_argument("--config", type=str, default="deploy/mmk_xhand_config.yaml",
-                        help="Path to configuration file")
+    parser = argparse.ArgumentParser(description="MMK 机器人 ZMQ 转发器")
+    parser.add_argument("--config", type=str, default="deploy/gr00t_mmk_xhand_config.yaml",
+                        help="配置文件路径")
     parser.add_argument("--port", type=int, default=5556,
-                        help="ZMQ port to listen on")
+                        help="监听 ZMQ 端口")
     parser.add_argument("--log-level", type=str, default="INFO",
-                        help="Logging level")
+                        help="日志等级")
     
     args = parser.parse_args()
     
-    # Setup logging
+    # 配置日志
     logging.basicConfig(
         level=getattr(logging, args.log_level.upper()),
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
     
-    # Create and run forwarder
+    # 创建并运行转发器
     forwarder = MMKForwarder(args.config, args.port)
     forwarder.run()
 

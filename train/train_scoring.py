@@ -301,22 +301,27 @@ def train_scoring_model(args, logger):
 
     # Create dataset
     if args.load_from == "bson":
-        base_dataset = BsonVLADatasetWithLogpi(
+        bson_kwargs = dict(
             logpi_file=args.logpi_file,
-            bson_dir="data/ours/true",
             sub_sample=1.0,
             normalize_mode="min_max",
-            stats_file="v5_bson_stats/dataset_statistics.json"
         )
-        # Print logpi statistics
-        logpi_stats = base_dataset.get_logpi_statistics()
-        logger.info(f"Logpi statistics: {logpi_stats}")
+        if getattr(args, "bson_root", None) is not None:
+            bson_kwargs["bson_dir"] = args.bson_root
+        if getattr(args, "stats_file", None) is not None:
+            bson_kwargs["stats_file"] = args.stats_file
+        base_dataset = BsonVLADatasetWithLogpi(**bson_kwargs)
+        logger.info(f"Logpi statistics: {base_dataset.get_logpi_statistics()}")
     elif args.load_from == "lerobot":
-        base_dataset = LeRobotVLADatasetWithLogpi(
-            logpi_file=args.logpi_file
-        )
-        logpi_stats = base_dataset.get_logpi_statistics()
-        logger.info(f"Logpi statistics: {logpi_stats}")
+        lerobot_kwargs = dict(logpi_file=args.logpi_file)
+        if getattr(args, "lerobot_root", None) is not None:
+            lerobot_kwargs["repo_dir"] = args.lerobot_root
+        if getattr(args, "stats_file", None) is not None:
+            lerobot_kwargs["stats_file"] = args.stats_file
+        if getattr(args, "state_dim_keep", None) is not None:
+            lerobot_kwargs["state_dim_keep"] = int(args.state_dim_keep)
+        base_dataset = LeRobotVLADatasetWithLogpi(**lerobot_kwargs)
+        logger.info(f"Logpi statistics: {base_dataset.get_logpi_statistics()}")
     else:
         raise ValueError(f"Unsupported dataset type: {args.load_from}")
     
@@ -341,7 +346,11 @@ def train_scoring_model(args, logger):
         cam_ext_mask_prob=args.cam_ext_mask_prob,
         state_noise_snr=args.state_noise_snr,
         use_hdf5=args.load_from,
-        use_precomp_lang_embed=args.precomp_lang_embed
+        use_precomp_lang_embed=args.precomp_lang_embed,
+        lerobot_root=getattr(args, "lerobot_root", None),
+        bson_root=getattr(args, "bson_root", None),
+        stats_file=getattr(args, "stats_file", None),
+        state_dim_keep=getattr(args, "state_dim_keep", 36),
     )
     vla_dataset.dataset = train_dataset
     

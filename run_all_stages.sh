@@ -2,121 +2,113 @@
 # ============================================================================
 # Dexora end-to-end three-stage training pipeline.
 #
-# This script chains:
-#
-#   1. Stage-1   pretrain on simulation data           -> train_ours.sh
-#   2. Stage-2a  pre-screening (Aep, Jep) -> Spre      -> analyze_jerk.sh
-#   3. Stage-2b  Spre -> Shigh post-validation         -> replay_validate.py
-#   4. Stage-2c  log-pi proxy (Eq.(5))                 -> compute_logpi.py
-#   5. Stage-2d  discriminator PU training (Eq.(7))    -> train_scoring.sh
-#   6. Stage-3   quality-aware post-training (Eq.(8))  -> post_train.sh
+# Chains:
+#   1. Stage-1   pretrain on real data                  -> s1_pretrain.sh
+#   2. Stage-2a  pre-screening (Aep, Jep) -> Spre       -> s2a_analyze_jerk.sh
+#   3. Stage-2b  Spre -> Shigh post-validation          -> s2b_replay.sh
+#   4. Stage-2c  log-π proxy (Eq.(5))                   -> s2c_compute_logpi.sh
+#   5. Stage-2c  discriminator PU training (Eq.(7))     -> s2c_train_scoring.sh
+#   6. Stage-3   quality-aware post-training (Eq.(8))   -> s3_post_train.sh
 #
 # Override stages with the START_STAGE / END_STAGE env vars, e.g.
 #
-#   START_STAGE=4 END_STAGE=6 bash run_all_stages.sh
+#     START_STAGE=4 END_STAGE=6 bash run_all_stages.sh
 #
-# All outputs land in $RUN_DIR (default: ./runs/dexora-$(date +%Y%m%d-%H%M%S)).
+# Override paths via env vars (mirrored in each stage script):
+#
+#     DEXORA_LEROBOT_ROOT=/path/to/airbot_pick_and_place \
+#     RUN_DIR=./runs/dexora-paper-replication \
+#         bash run_all_stages.sh
 # ============================================================================
-
 set -Eeuo pipefail
 
 # ---------------------------------------------------------------------------
-# Config (override via env)
+# Where everything lives (each variable also matches the defaults inside the
+# individual s*_*.sh scripts so partial reruns work the same way).
 # ---------------------------------------------------------------------------
 START_STAGE="${START_STAGE:-1}"
 END_STAGE="${END_STAGE:-6}"
 RUN_DIR="${RUN_DIR:-./runs/dexora-$(date +%Y%m%d-%H%M%S)}"
 
-STAGE1_OUT="${STAGE1_OUT:-$RUN_DIR/stage1-pretrain}"
-SPRE_OUT="${SPRE_OUT:-$RUN_DIR/spre.json}"
-SHIGH_OUT="${SHIGH_OUT:-$RUN_DIR/shigh.json}"
-LOGPI_OUT="${LOGPI_OUT:-$RUN_DIR/logpi.json}"
-SCORING_OUT="${SCORING_OUT:-$RUN_DIR/stage2-scoring}"
-STAGE3_OUT="${STAGE3_OUT:-$RUN_DIR/stage3-posttrain}"
+export DEXORA_LEROBOT_ROOT="${DEXORA_LEROBOT_ROOT:-data/Dexora_Real-World_Dataset/airbot_pick_and_place}"
+export DEXORA_T5="${DEXORA_T5:-google/t5-v1_1-xxl}"
+export DEXORA_SIGLIP="${DEXORA_SIGLIP:-google/siglip-so400m-patch14-384}"
+export DEXORA_STATS="${DEXORA_STATS:-new_lerobot_stats/dataset_statistics.json}"
 
-REPLAY_VERIFIER="${REPLAY_VERIFIER:-trust_spre}"   # trust_spre / energy / mujoco
-CONFIG_PATH="${CONFIG_PATH:-configs/base_400m.yaml}"
+export OUTPUT_DIR="${OUTPUT_DIR:-$RUN_DIR/stage1-pretrain}"
+export STAGE1_CKPT="${STAGE1_CKPT:-$RUN_DIR/stage1-pretrain}"
+export SPRE_DIR="${SPRE_DIR:-$RUN_DIR/spre}"
+export SHIGH_FILE="${SHIGH_FILE:-$RUN_DIR/shigh.json}"
+export LOGPI_FILE="${LOGPI_FILE:-$RUN_DIR/logpi/logpi.json}"
+export SCORING_OUT="${SCORING_OUT:-$RUN_DIR/stage2-scoring}"
+export SCORING_CKPT="${SCORING_CKPT:-$SCORING_OUT/final_model/pytorch_model.bin}"
+export STAGE3_OUT="${STAGE3_OUT:-$RUN_DIR/stage3-posttrain}"
+
+export REPLAY_VERIFIER="${REPLAY_VERIFIER:-trust_spre}"
 
 mkdir -p "$RUN_DIR"
 echo "==> RUN_DIR=$RUN_DIR"
 echo "==> Stages: $START_STAGE..$END_STAGE"
 
-# ---------------------------------------------------------------------------
-# Helper
-# ---------------------------------------------------------------------------
 run_stage() {
     local n="$1" name="$2"
     if (( n < START_STAGE || n > END_STAGE )); then
         echo "==> [skip ] stage $n: $name"
-        return 0
+        return 1
     fi
     echo
     echo "================================================================"
     echo "==> [stage] $n: $name"
     echo "================================================================"
+    return 0
 }
 
 # ---------------------------------------------------------------------------
-# 1. Stage-1: pretrain on simulation
+# 1. Stage-1: pretrain
 # ---------------------------------------------------------------------------
-run_stage 1 "Stage-1 pretrain on simulation (train_ours.sh)"
-if (( START_STAGE <= 1 && END_STAGE >= 1 )); then
-    OUTPUT_DIR="$STAGE1_OUT" bash train_ours.sh
+if run_stage 1 "Stage-1 pretrain (s1_pretrain.sh)"; then
+    OUTPUT_DIR="$STAGE1_CKPT" bash s1_pretrain.sh
 fi
 
 # ---------------------------------------------------------------------------
-# 2. Stage-2a: pre-screening (Aep, Jep) -> Spre
+# 2. Stage-2a: pre-screening
 # ---------------------------------------------------------------------------
-run_stage 2 "Stage-2a pre-screening (analyze_jerk.sh -> Spre)"
-if (( START_STAGE <= 2 && END_STAGE >= 2 )); then
-    bash analyze_jerk.sh
-    # analyze_jerk.sh writes to new_lerobot_jerk/complete_analysis_results.json
-    cp -v new_lerobot_jerk/complete_analysis_results.json "$SPRE_OUT"
+if run_stage 2 "Stage-2a pre-screening (s2a_analyze_jerk.sh)"; then
+    SPRE_DIR="$SPRE_DIR" bash s2a_analyze_jerk.sh
 fi
 
 # ---------------------------------------------------------------------------
-# 3. Stage-2b: replay-based post-validation -> Shigh
+# 3. Stage-2b: replay post-validation
 # ---------------------------------------------------------------------------
-run_stage 3 "Stage-2b replay-based post-validation -> Shigh"
-if (( START_STAGE <= 3 && END_STAGE >= 3 )); then
-    python replay_validate.py \
-        --pre_screening_file "$SPRE_OUT" \
-        --output_file "$SHIGH_OUT" \
-        --verifier "$REPLAY_VERIFIER"
+if run_stage 3 "Stage-2b replay verification (s2b_replay.sh)"; then
+    SPRE_DIR="$SPRE_DIR" SHIGH_FILE="$SHIGH_FILE" REPLAY_VERIFIER="$REPLAY_VERIFIER" \
+        bash s2b_replay.sh
 fi
 
 # ---------------------------------------------------------------------------
-# 4. Stage-2c: log-pi proxy
+# 4. Stage-2c-1: log-π proxy
 # ---------------------------------------------------------------------------
-run_stage 4 "Stage-2c log-pi proxy (compute_logpi.py)"
-if (( START_STAGE <= 4 && END_STAGE >= 4 )); then
-    python compute_logpi.py \
-        --config_path "$CONFIG_PATH" \
-        --model_path "$STAGE1_OUT" \
-        --output_file "$LOGPI_OUT" \
-        --normalize_mode zscore
+if run_stage 4 "Stage-2c-1 log-π proxy (s2c_compute_logpi.sh)"; then
+    STAGE1_CKPT="$STAGE1_CKPT" LOGPI_FILE="$LOGPI_FILE" \
+        bash s2c_compute_logpi.sh
 fi
 
 # ---------------------------------------------------------------------------
-# 5. Stage-2d: discriminator PU training
+# 5. Stage-2c-2: discriminator PU training
 # ---------------------------------------------------------------------------
-run_stage 5 "Stage-2d discriminator PU training (train_scoring.sh)"
-if (( START_STAGE <= 5 && END_STAGE >= 5 )); then
-    OUTPUT_DIR="$SCORING_OUT" \
-    LOGPI_FILE="$LOGPI_OUT" \
-    SHIGH_FILE="$SHIGH_OUT" \
-        bash train_scoring.sh
+if run_stage 5 "Stage-2c-2 discriminator PU training (s2c_train_scoring.sh)"; then
+    OUTPUT_DIR="$SCORING_OUT" LOGPI_FILE="$LOGPI_FILE" \
+    SPRE_FILE="$SPRE_DIR/complete_analysis_results.json" SHIGH_FILE="$SHIGH_FILE" \
+        bash s2c_train_scoring.sh
 fi
 
 # ---------------------------------------------------------------------------
 # 6. Stage-3: quality-aware post-training
 # ---------------------------------------------------------------------------
-run_stage 6 "Stage-3 quality-aware post-training (post_train.sh)"
-if (( START_STAGE <= 6 && END_STAGE >= 6 )); then
-    STAGE1_CKPT="$STAGE1_OUT" \
-    SCORING_CKPT="$SCORING_OUT/final_model/pytorch_model.bin" \
+if run_stage 6 "Stage-3 quality-aware post-training (s3_post_train.sh)"; then
+    STAGE1_CKPT="$STAGE1_CKPT" SCORING_CKPT="$SCORING_CKPT" \
     OUTPUT_DIR="$STAGE3_OUT" \
-        bash post_train.sh
+        bash s3_post_train.sh
 fi
 
 echo

@@ -36,8 +36,32 @@ def parse_args():
     parser.add_argument(
         "--dataset_path",
         type=str,
-        default="data/ours/true",
-        help="Path to the dataset.",
+        default=None,
+        help=(
+            "Path to the dataset directory. For ``--load_from=lerobot`` this "
+            "is the LeRobot v2.1 dataset root (e.g. "
+            "``data/Dexora_Real-World_Dataset/airbot_pick_and_place``); for "
+            "``--load_from=bson`` this is the BSON dataset root."
+        ),
+    )
+    parser.add_argument(
+        "--load_from",
+        type=str,
+        default="lerobot",
+        choices=["lerobot", "bson"],
+        help="Dataset backend (LeRobot v2.1 release or legacy BSON).",
+    )
+    parser.add_argument(
+        "--stats_file",
+        type=str,
+        default=None,
+        help="Optional dataset_statistics.json for normalization.",
+    )
+    parser.add_argument(
+        "--state_dim_keep",
+        type=int,
+        default=36,
+        help="Slice state/action to first N dims (36 = paper layout).",
     )
     parser.add_argument(
         "--output_file",
@@ -364,14 +388,25 @@ def main():
     except Exception as e:
         print(f"[DEBUG] Failed to read module dtypes: {e}")
     
-    print(f"Loading dataset from {args.dataset_path}...")
-    # dataset = BsonVLADataset(
-    #     bson_dir=args.dataset_path,
-    #     sub_sample=1.0,
-    #     normalize_mode="min_max",
-    #     stats_file="v5_bson_stats/dataset_statistics.json"
-    # )
-    dataset = LeRobotVLADataset(repo_dir=args.dataset_path)
+    print(f"Loading dataset from {args.dataset_path} (backend={args.load_from})...")
+    if args.load_from == "lerobot":
+        ds_kwargs = {}
+        if args.dataset_path is not None:
+            ds_kwargs["repo_dir"] = args.dataset_path
+        if args.stats_file is not None:
+            ds_kwargs["stats_file"] = args.stats_file
+        if args.state_dim_keep is not None:
+            ds_kwargs["state_dim_keep"] = int(args.state_dim_keep) if args.state_dim_keep > 0 else None
+        dataset = LeRobotVLADataset(**ds_kwargs)
+    elif args.load_from == "bson":
+        ds_kwargs = dict(sub_sample=1.0, normalize_mode="min_max")
+        if args.dataset_path is not None:
+            ds_kwargs["bson_dir"] = args.dataset_path
+        if args.stats_file is not None:
+            ds_kwargs["stats_file"] = args.stats_file
+        dataset = BsonVLADataset(**ds_kwargs)
+    else:
+        raise ValueError(f"Unknown --load_from: {args.load_from!r}")
     
     # Data collator
     data_collator = DataCollatorForVLAConsumerDataset(

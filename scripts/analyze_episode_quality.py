@@ -151,7 +151,7 @@ def calculate_episode_metrics(states: np.ndarray, dt: float) -> Dict[str, float]
     }
 
 
-def sample_episodes(dataset: LeRobotDataset, num_episodes: int = 100, normalizer: Optional[DataNormalizer] = None) -> List[Tuple[int, np.ndarray]]:
+def sample_episodes(dataset: LeRobotDataset, num_episodes: int = 100, normalizer: Optional[DataNormalizer] = None, state_dim_keep: Optional[int] = 36) -> List[Tuple[int, np.ndarray]]:
     """
     Sample random episodes from the dataset with optional normalization.
     
@@ -175,12 +175,21 @@ def sample_episodes(dataset: LeRobotDataset, num_episodes: int = 100, normalizer
         ep_start = dataset.episode_data_index["from"][ep_idx].item()
         ep_end = dataset.episode_data_index["to"][ep_idx].item()
         
-        # Extract states for this episode
+        # Extract states for this episode. LeRobot v2.1 column is
+        # ``observation.state``; older custom converters used plural ``states``.
+        # Probe once per episode and stick with whichever works.
         episode_states = []
+        state_key = None
         for i in tqdm(range(ep_start, ep_end), desc=f"Loading episode {ep_idx}", leave=False):
             try:
                 sample = dataset[i]
-                state = sample['states'].numpy()
+                if state_key is None:
+                    state_key = (
+                        'observation.state' if 'observation.state' in sample
+                        else 'states'
+                    )
+                state = sample[state_key]
+                state = state.numpy() if hasattr(state, 'numpy') else np.asarray(state)
                 episode_states.append(state)
             except Exception as e:
                 print(f"Error loading sample {i}: {e}")
@@ -188,11 +197,17 @@ def sample_episodes(dataset: LeRobotDataset, num_episodes: int = 100, normalizer
         
         if len(episode_states) > 2:  # Need at least 3 timesteps
             states_array = np.array(episode_states)
-            
+
+            # Slice to the paper's 36-D layout if requested. The Dexora HF
+            # release is 39-D (adds head_joint_1, head_joint_2, spine_joint);
+            # the paper policy and the released stats files are both 36-D.
+            if state_dim_keep is not None and states_array.shape[-1] > int(state_dim_keep):
+                states_array = states_array[..., :int(state_dim_keep)]
+
             # Apply normalization if provided
             if normalizer is not None:
                 states_array = normalizer.normalize_data(states_array, 'state')
-            
+
             sampled_episodes.append((ep_idx, states_array))
     
     return sampled_episodes
@@ -388,6 +403,12 @@ def main():
                         help=("Override sampling frequency. If unset, we read it from the "
                               "LeRobot dataset metadata; if that is also missing, default to "
                               "20 Hz (Dexora paper §III-A)."))
+    parser.add_argument('--state_dim_keep', type=int, default=36,
+                        help=("Slice each frame's state vector to the first N dims before "
+                              "computing Aep / Jep. Default 36 matches the paper's flat "
+                              "[left_arm(6) | right_arm(6) | left_hand(12) | right_hand(12)] "
+                              "layout. Pass 0 to keep the full 39-D vector (HF release adds "
+                              "head_joint_1, head_joint_2, spine_joint)."))
 
     args = parser.parse_args()
 
@@ -398,8 +419,9 @@ def main():
 
     normalizer = DataNormalizer(stats_file=args.stats_file, normalize_mode=args.normalize_mode)
 
+    # LeRobot v2.1 columns are singular (``observation.state``, ``action``).
     delta_timestamps = {
-        'states': [0],
+        'observation.state': [0],
     }
     dataset = LeRobotDataset("", args.lerobot_root, delta_timestamps=delta_timestamps)
     disable_video_loading(dataset)
@@ -413,8 +435,9 @@ def main():
     dt = 1.0 / float(fps)
     print(f"Using fps={fps} Hz (dt={dt:.6f}s) for centered-difference derivatives.")
 
-    print(f"Sampling {args.num_episodes} episodes with normalization...")
-    episodes = sample_episodes(dataset, args.num_episodes, normalizer)
+    state_dim_keep = int(args.state_dim_keep) if args.state_dim_keep and args.state_dim_keep > 0 else None
+    print(f"Sampling {args.num_episodes} episodes with normalization (state_dim_keep={state_dim_keep})...")
+    episodes = sample_episodes(dataset, args.num_episodes, normalizer, state_dim_keep=state_dim_keep)
     print(f"Successfully sampled {len(episodes)} episodes")
 
     if len(episodes) == 0:

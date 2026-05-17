@@ -42,9 +42,31 @@ def parse_args(input_args=None):
     parser.add_argument(
         "--load_from",
         type=str,
-        default="bson",
-        choices=["hdf5", "bson", "egodex", "lerobot"],
-        help="Type of dataset to load."
+        default="lerobot",
+        choices=["bson", "lerobot"],
+        help=(
+            "Dataset backend. Stage-2 (discriminator training) supports "
+            "``lerobot`` (HF release) and ``bson`` (legacy)."
+        ),
+    )
+    parser.add_argument(
+        "--lerobot_root", type=str, default=None,
+        help="Path to LeRobot v2.1 dataset root "
+             "(required when --load_from=lerobot).",
+    )
+    parser.add_argument(
+        "--bson_root", type=str, default=None,
+        help="Path to BSON dataset root (legacy).",
+    )
+    parser.add_argument(
+        "--stats_file", type=str, default=None,
+        help="Path to dataset_statistics.json for per-dim min-max "
+             "normalization.",
+    )
+    parser.add_argument(
+        "--state_dim_keep", type=int, default=36,
+        help="Slice state/action to first N dims; default 36 matches the paper "
+             "layout (HF release stores 39 dims).",
     )
     parser.add_argument(
         "--train_batch_size", type=int, default=8, help="Batch size (per device) for the training dataloader."

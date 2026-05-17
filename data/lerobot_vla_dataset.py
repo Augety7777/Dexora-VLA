@@ -18,24 +18,67 @@ class LeRobotVLADataset:
     Simple wrapper around LeRobotDataset with key mapping to match BsonVLADataset interface.
     """
     
-    def __init__(self, repo_dir: str="dataprocess/output/airbot_dexterous_bimanual_dexterous_manipulation", 
-                # normalize_mode: str=None, stats_file: str=None,
-                normalize_mode: str="min_max", stats_file: str="new_lerobot_stats/dataset_statistics.json",
-                load_imgs: bool=True) -> None:
-        # Load config
-        config_path = Path("configs/base.yaml")
-        with open(config_path, 'r') as f:
-            config = yaml.safe_load(f)
-        
-        self.CHUNK_SIZE = config['common']['action_chunk_size']
-        self.IMG_HISTORY_SIZE = config['common']['img_history_size']
+    def __init__(self, repo_dir: str="dataprocess/output/airbot_dexterous_bimanual_dexterous_manipulation",
+                 normalize_mode: str = "min_max",
+                 stats_file: str = "new_lerobot_stats/dataset_statistics.json",
+                 load_imgs: bool = True,
+                 config_path: Optional[str] = None,
+                 chunk_size: int = 32,
+                 img_history_size: int = 1,
+                 state_dim_keep: Optional[int] = 36) -> None:
+        """
+        LeRobot v2.1 (Dexora real-world) dataset adapter.
+
+        The HuggingFace release uses these video keys (see Dexora_Real-World_Dataset
+        README): ``observation.images.{top, wrist_left, wrist_right, front}``. We
+        map them onto the BSON-era internal names (``cam_high / cam_left_wrist /
+        cam_right_wrist / cam_third_view``) so the rest of the training stack
+        (``train/dataset.py``, ``RDTRunner``) doesn't have to change.
+
+        ``config_path`` is optional. If provided we read ``action_chunk_size`` /
+        ``img_history_size`` from it; otherwise we fall back to the explicit
+        ``chunk_size`` / ``img_history_size`` arguments (defaults: 32 / 1, which
+        is what ``configs/base_400m.yaml`` uses). Earlier versions of this class
+        forced loading ``configs/base.yaml`` and would crash if the cwd wasn't
+        the repo root.
+        """
+        if config_path is None:
+            # Try ``configs/base_400m.yaml`` first (the paper spec); silently
+            # fall back to the (chunk_size, img_history_size) kwargs if that
+            # file is missing too. Keep the script usable from any cwd.
+            for candidate in ("configs/base_400m.yaml", "configs/base.yaml"):
+                if Path(candidate).is_file():
+                    config_path = candidate
+                    break
+        if config_path is not None and Path(config_path).is_file():
+            with open(config_path, 'r') as f:
+                config = yaml.safe_load(f)
+            self.CHUNK_SIZE = int(config['common'].get('action_chunk_size', chunk_size))
+            self.IMG_HISTORY_SIZE = int(config['common'].get('img_history_size', img_history_size))
+        else:
+            self.CHUNK_SIZE = int(chunk_size)
+            self.IMG_HISTORY_SIZE = int(img_history_size)
+
+        # LeRobot v2.1 / Dexora open-source camera keys -> internal aliases.
+        # Mapping is intentionally the **identity** when the dataset already
+        # uses the new convention; the second element is the BSON-era short
+        # name that ``train/dataset.py`` consumes downstream.
         self.camera_keys = [
-            ("camera_high", "cam_high"),
-            ("camera_left", "cam_left_wrist"),
-            ("camera_right", "cam_right_wrist"),
-            ("camera_front", "cam_third_view"),
+            ("top",         "cam_high"),
+            ("wrist_left",  "cam_left_wrist"),
+            ("wrist_right", "cam_right_wrist"),
+            ("front",       "cam_third_view"),
         ]
         self.DATASET_NAME = "ours"
+
+        # Dexora paper §III-A uses a flat 36-D state:
+        #   [ left_arm(6) | right_arm(6) | left_hand(12) | right_hand(12) ]
+        # The public Dexora_Real-World_Dataset (LeRobot v2.1) stores 39 dims,
+        # appending [head_joint_1, head_joint_2, spine_joint] from the AIRBOT
+        # platform. The paper policy does not control those, so we slice them
+        # off by default. Set ``state_dim_keep=None`` to retain the full 39-D
+        # vector (e.g. for whole-body experiments outside the paper).
+        self.state_dim_keep = state_dim_keep
         
         # Normalization settings
         self.normalize_mode = normalize_mode
@@ -62,15 +105,20 @@ class LeRobotVLADataset:
         metadata = LeRobotDatasetMetadata("", repo_dir)
         fps = metadata.fps
 
+        # LeRobot v2.1 column names: ``observation.state`` / ``action`` (singular).
+        # ``delta_timestamps`` keys must match the underlying dataset columns,
+        # otherwise hf_datasets raises KeyError: "Column states not in the dataset"
+        # as soon as we try to fetch a sample.
         delta_timestamps = {
-            'states': [0],
-            "actions": [i/fps for i in range(self.CHUNK_SIZE)]
+            'observation.state': [0],
+            'action': [i / fps for i in range(self.CHUNK_SIZE)],
         }
         if load_imgs:
-            for cam,_ in self.camera_keys:
-                delta_timestamps[f"observation.images.{cam}"] = [i/fps for i in range(1-self.IMG_HISTORY_SIZE, 1)]
+            for cam, _ in self.camera_keys:
+                delta_timestamps[f"observation.images.{cam}"] = [
+                    i / fps for i in range(1 - self.IMG_HISTORY_SIZE, 1)
+                ]
 
-        # self.dataset = MultiLeRobotDataset(repo_ids, repo_dir, delta_timestamps=delta_timestamps)
         self.dataset = LeRobotDataset("", repo_dir, delta_timestamps=delta_timestamps, video_backend="pyav")
 
     def __len__(self):
@@ -152,7 +200,19 @@ class LeRobotVLADataset:
             instruction = task
         else:
             instruction = str(task)
-        # Map keys to BsonVLADataset format
+        # Map keys to BsonVLADataset format. v2.1 columns are
+        # ``observation.state`` (T_state, D) and ``action`` (T_action, D).
+        state_np = item['observation.state'].numpy()
+        action_np = item['action'].numpy()
+        # Slice to the 36-D paper layout when ``state_dim_keep`` is set
+        # (default). HF dataset is 39-D; the last 3 dims (head/spine) are not
+        # part of the Dexora policy.
+        if self.state_dim_keep is not None:
+            k = int(self.state_dim_keep)
+            if state_np.shape[-1] > k:
+                state_np = state_np[..., :k]
+            if action_np.shape[-1] > k:
+                action_np = action_np[..., :k]
         sample = {
             "meta": {
                 "dataset_name": self.DATASET_NAME,
@@ -160,9 +220,9 @@ class LeRobotVLADataset:
                 'step_id': step_id,
                 'instruction': instruction,
             },
-            "state": item['states'].numpy(),
-            "actions": item['actions'].numpy(),
-            "state_indicator": np.ones(item["states"].shape[1], dtype=bool),
+            "state": state_np,
+            "actions": action_np,
+            "state_indicator": np.ones(state_np.shape[-1], dtype=bool),
         }
         
         sample["state_std"] = np.std(sample["state"], axis=0)
@@ -210,9 +270,17 @@ class LeRobotVLADataset:
         # Get single sample - much more efficient for statistics
         item = self.dataset[index]
         
-        # Extract state and action from single sample
-        state = item["states"].numpy()
-        action = item["actions"].numpy()
+        # Extract state and action from single sample. v2.1 columns are
+        # ``observation.state`` / ``action`` (no plural ``s``).
+        state = item["observation.state"].numpy()
+        action = item["action"].numpy()
+        # Drop the 3 platform-specific dims when computing paper-aligned stats.
+        if self.state_dim_keep is not None:
+            k = int(self.state_dim_keep)
+            if state.shape[-1] > k:
+                state = state[..., :k]
+            if action.shape[-1] > k:
+                action = action[..., :k]
         
         # Apply normalization if enabled
         if self.normalize_mode:

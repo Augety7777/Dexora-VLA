@@ -14,10 +14,10 @@ from PIL import Image
 import transformers
 
 from data.filelock import FileLock
-from data.hdf5_vla_dataset import HDF5VLADataset
-from data.bson_vla_dataset_new import BsonVLADataset
-# from data.egodex_vla_dataset import EgoDexVLADataset
-from data.lerobot_vla_dataset import LeRobotVLADataset
+# The dataset backends are imported lazily inside ``VLAConsumerDataset.__init__``
+# (see ``use_hdf5`` branch). This lets us keep the legacy ``hdf5`` / ``bson`` /
+# ``egodex`` paths around without making them hard dependencies of the
+# canonical ``lerobot`` workflow that the open-source release uses.
 from train.image_corrupt import image_corrupt
 
 
@@ -83,7 +83,7 @@ class VLAConsumerDataset(Dataset):
     """
     
     def __init__(
-        self, 
+        self,
         config,
         tokenizer,
         image_processor,
@@ -96,11 +96,33 @@ class VLAConsumerDataset(Dataset):
         cond_mask_prob=0.1,
         cam_ext_mask_prob=-1.0,
         state_noise_snr=None,
-        use_hdf5="hdf5",
-        use_precomp_lang_embed=False
+        use_hdf5="lerobot",
+        use_precomp_lang_embed=False,
+        lerobot_root=None,
+        bson_root=None,
+        stats_file=None,
+        state_dim_keep=36,
     ):
-        super(VLAConsumerDataset, self).__init__()
-        
+        """
+        ``use_hdf5`` selects the underlying dataset backend. Despite the legacy
+        name it now accepts any of ``{"lerobot", "bson", "hdf5", "egodex"}``.
+
+        For the canonical Dexora workflow the open-source release uses
+        ``use_hdf5="lerobot"`` and points at the LeRobot v2.1 dataset that the
+        paper ships on HuggingFace (``Dexora/Dexora_Real-World_Dataset``).
+        Both ``lerobot_root`` (path to the dataset directory) and
+        ``stats_file`` (path to ``dataset_statistics.json`` for per-dim
+        min-max normalization) are forwarded to ``LeRobotVLADataset`` when
+        provided. The deprecated BSON / HDF5 / EgoDex paths remain available
+        for legacy use cases via ``bson_root`` and the corresponding loaders.
+
+        ``state_dim_keep=36`` slices the 39-D HF state vector to the paper's
+        36-D ``[left_arm | right_arm | left_hand | right_hand]`` layout
+        (the last 3 head/spine dims are AIRBOT SDK requirements that the
+        policy does not control); set to ``None`` to keep all 39 dims.
+        """
+        super().__init__()
+
         # Load the control frequency for each dataset
         with open("configs/dataset_control_freq.json", 'r') as fp:
             self.control_freq = json.load(fp)
@@ -112,9 +134,9 @@ class VLAConsumerDataset(Dataset):
         # Create the mapping between dataset name and id
         self.dataset_name2id = {name: i for i, name in enumerate(DATASET_NAMES)}
         self.dataset_id2name = {i: name for i, name in enumerate(DATASET_NAMES)}
-        
+
         self.image_processor = image_processor
-        
+
         self.buffer_dir = config["buf_path"]
         self.num_chunks = config["buf_num_chunks"]
         self.chunk_size = config["buf_chunk_size"]
@@ -127,16 +149,36 @@ class VLAConsumerDataset(Dataset):
         self.cam_ext_mask_prob = cam_ext_mask_prob
         self.use_hdf5 = use_hdf5
         self.hdf5_dataset = None
-        if use_hdf5 == "hdf5":
-            self.hdf5_dataset = HDF5VLADataset()
+        # Lazy backend import — keeps optional deps optional.
+        if use_hdf5 == "lerobot":
+            from data.lerobot_vla_dataset import LeRobotVLADataset
+            ds_kwargs = {}
+            if lerobot_root is not None:
+                ds_kwargs["repo_dir"] = lerobot_root
+            if stats_file is not None:
+                ds_kwargs["stats_file"] = stats_file
+            if state_dim_keep is not None:
+                ds_kwargs["state_dim_keep"] = int(state_dim_keep)
+            self.hdf5_dataset = LeRobotVLADataset(**ds_kwargs)
         elif use_hdf5 == "bson":
-            self.hdf5_dataset = BsonVLADataset()
+            from data.bson_vla_dataset_new import BsonVLADataset
+            ds_kwargs = {}
+            if bson_root is not None:
+                ds_kwargs["bson_dir"] = bson_root
+            if stats_file is not None:
+                ds_kwargs["stats_file"] = stats_file
+            self.hdf5_dataset = BsonVLADataset(**ds_kwargs)
+        elif use_hdf5 == "hdf5":
+            from data.hdf5_vla_dataset import HDF5VLADataset
+            self.hdf5_dataset = HDF5VLADataset()
         elif use_hdf5 == "egodex":
+            from data.egodex_vla_dataset import EgoDexVLADataset  # noqa: F401
             self.hdf5_dataset = EgoDexVLADataset()
-        elif use_hdf5 == "lerobot":
-            self.hdf5_dataset = LeRobotVLADataset()
         else:
-            raise ValueError(f"Unknown use_hdf5: {use_hdf5}")
+            raise ValueError(
+                f"Unknown dataset backend {use_hdf5!r}. "
+                "Expected one of {'lerobot', 'bson', 'hdf5', 'egodex'}."
+            )
         self.use_precomp_lang_embed = use_precomp_lang_embed
         if use_precomp_lang_embed:
             self.empty_lang_embed = torch.load("data/empty_lang_embed.pt")
