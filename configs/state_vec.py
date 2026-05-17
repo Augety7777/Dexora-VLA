@@ -1,3 +1,21 @@
+"""
+Legacy 128-D unified state-vector mapping inherited from RDT / OpenX.
+
+NOTE — Dexora paper §III-A uses a flat **36-D** state vector
+``[ right_arm(6) | right_hand(12) | left_arm(6) | left_hand(12) ]`` for the
+dual-AIRBOT + 2x XHAND embodiment, and **all paper-related code paths
+(Stage-1 / Stage-3 training, scoring, post-training, cross-embodiment
+projection) operate in that 36-D space directly** (see
+``configs/base_400m.yaml`` and ``configs/cross_embodiment/*.yaml``).
+
+The 128-D mapping below is only consumed by the legacy multi-embodiment
+data preprocess scripts (``data/preprocess_scripts/*.py``,
+``data/hdf5_vla_dataset.py``, ``data/episode_transform.py``, etc.) that
+were ported from RDT for cross-corpus pretraining and are **not** what the
+Dexora ICRA'26 paper trains on. Do not introduce new code that imports this
+mapping; for the Dexora corpus use the 36-D layout directly.
+"""
+
 STATE_VEC_IDX_MAPPING = {
     # [0, 10): right arm joint positions
     **{

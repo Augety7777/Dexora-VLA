@@ -162,12 +162,25 @@ python replay_validate.py \
 ```
 
 ### Stage 2c — log-π proxy + discriminator training
-Compute the policy-compatibility proxy `\hat{log π}` (Eq.(4)-(5), z-scored) using the Stage-1 policy, then train the discriminator with PU loss (Eq.(7), η=0.5).
+Compute the policy-compatibility proxy `\hat{log π}_t = -zscore(E_t)` (Eq.(4)-(5))
+using the Stage-1 policy, then train the discriminator with PU loss (Eq.(7), η=0.5).
 
 ```bash
 bash compute_logpi.sh    # writes new_lerobot_logpi_values.json
 bash train_scoring.sh    # writes checkpoints/scoring-model-v1
 ```
+
+`compute_logpi.py` writes two files:
+
+* `<output_file>_raw_E.json` — raw per-chunk energies `E_t` from Eq.(4).
+* `<output_file>` — `\hat{log π}_t = -zscore(E_t)` from Eq.(5) (one scalar per chunk).
+
+The discriminator (`models/scoring_model.py`) consumes the scalar `\hat{log π}_t`
+token exactly as in the paper, but projects it via a small **sinusoidal
+positional-style encoding** (8 frequency bands + raw) before the linear layer
+for numerical stability under bf16. This is equivalent in expressivity to a
+plain `Linear(1 -> hidden_size)` but is more robust when the z-scored proxy
+sits near zero.
 
 ### Stage 3 — Data-quality-aware post-training (NEW)
 Post-trains the Stage-1 policy on real data with **discriminator-weighted diffusion loss** (Eq.(8)):
@@ -192,6 +205,24 @@ python deploy/run_inference.py \
     --pretrained_model_name_or_path checkpoints/dexora-400m-posttrain/ \
     --config_path configs/base_400m.yaml
 ```
+
+### Noise schedule and inference steps
+
+Training (Stage-1 / Stage-3) uses a standard 1000-step DDPM forward process
+with cosine `squaredcos_cap_v2` beta schedule, predicting the action noise
+`\hat{eps}_theta` (paper §III-C). At inference we replace DDPM with
+**DPMSolver++** (a multi-step ODE solver from `diffusers`) and run only
+`num_inference_timesteps = 5` solver steps; the same setting was used to
+produce all numbers in Tab. I / II / III. Increasing it to 10-20 marginally
+improves smoothness on the dexterous tasks (Tab. III's Acc / Jerk) at a
+proportional latency cost; 5 is a good default for the 36-DoF rollout
+budget on a single RTX 4090.
+
+> Backward compatibility: older Dexora checkpoints were saved with
+> `prediction_type=sample`. `RDTRunner.compute_loss` and
+> `scripts/compute_logpi.py` both handle the `sample` branch as well, so
+> these checkpoints continue to load even though new training defaults to
+> `epsilon`.
 
 ## Reproducing the Paper Numbers
 

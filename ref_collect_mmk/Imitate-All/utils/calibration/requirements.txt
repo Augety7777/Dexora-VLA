@@ -1,2 +1,0 @@
-apriltag
-opencv-python

@@ -61,7 +61,10 @@ model:
     num_train_timesteps: 1000
     num_inference_timesteps: 5
     beta_schedule: squaredcos_cap_v2  # Critical choice
-    prediction_type: sample
+    # Paper §III-C predicts the action noise \hat{eps}_theta. Older
+    # checkpoints serialized with prediction_type=sample remain loadable
+    # because RDTRunner / compute_logpi.py support both branches.
+    prediction_type: epsilon
     clip_sample: False
   # For EMA (params averaging)
   # We do not use EMA currently

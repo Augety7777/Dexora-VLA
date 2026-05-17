@@ -120,7 +120,7 @@ class ScoringDataset(torch.utils.data.Dataset):
 
 def pu_loss_function(scores, is_expert, eta=0.5, variant="paper"):
     """
-    Positive-Unlabeled discriminator loss.
+    Positive-Unlabeled discriminator loss for the Dexora discriminator (Eq.(7)).
 
     Two supported variants:
 
@@ -137,6 +137,22 @@ def pu_loss_function(scores, is_expert, eta=0.5, variant="paper"):
       The third subtractive term debiases the unlabeled term using the
       positives. Empirically close to the paper variant when |Shigh| << |U|.
 
+    Reduction
+    ---------
+    Each expectation is implemented as a **separate mean** over its sub-batch
+    (positives vs unlabeled) rather than a single ``mean()`` over the full
+    batch. This is a numerically safer estimator of the two expectations when
+    Shigh is rare (|Shigh| << |U|, paper: ~15%) and matches what DWBC does in
+    practice; it differs from a single batch mean by at most an O(|Shigh|/B)
+    re-weighting, which is folded into the ``eta`` hyper-parameter.
+
+    Clipping
+    --------
+    Following the paper's "apply clip scores to d ∈ [0.1, 0.9] for stability",
+    we hard-clamp ``scores`` (already in (0, 1) after the sigmoid head) to that
+    interval before taking logs, then add an additional ``tiny`` epsilon to
+    keep ``log(1-d)`` finite at the boundary.
+
     Args:
         scores: Model output scores [B, 1] in (0, 1) (after sigmoid).
         is_expert: Binary labels [B] (1.0 for positives in Shigh, 0.0 for U).
@@ -149,10 +165,10 @@ def pu_loss_function(scores, is_expert, eta=0.5, variant="paper"):
     # Squeeze and upcast to float32 for numerically-stable logs under bf16
     scores = scores.squeeze(-1).to(dtype=torch.float32)  # [B]
 
-    # Following the paper's "apply clip scores to d ∈ [0.1, 0.9] for stability"
-    # we re-scale the sigmoid output to that range so gradients never saturate.
-    scores = 0.1 + 0.8 * scores
+    # Paper: "apply clip scores to d ∈ [0.1, 0.9] for stability".
+    # A tiny epsilon keeps log(1 - d) finite at the boundary.
     tiny = 1e-6
+    scores = torch.clamp(scores, 0.1, 0.9)
     scores = torch.clamp(scores, tiny, 1.0 - tiny)
 
     expert_mask = is_expert == 1.0

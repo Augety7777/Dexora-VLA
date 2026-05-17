@@ -33,7 +33,7 @@ model:
     num_train_timesteps: 1000
     num_inference_timesteps: 5
     beta_schedule: squaredcos_cap_v2
-    prediction_type: sample
+    prediction_type: epsilon   # Eq.(8) trains on noise residual; matches base_400m.yaml.
     clip_sample: False
   ema:
     update_after_step: 0

@@ -9,7 +9,7 @@ import pytest
 
 np = pytest.importorskip("numpy")
 
-from replay_validate import (  # noqa: E402
+from scripts.replay_validate import (  # noqa: E402
     VERIFIER_REGISTRY,
     energy_heuristic_verifier,
     mujoco_replay_verifier_factory,
@@ -91,7 +91,7 @@ def test_end_to_end_trust_spre(tmp_path):
     # Recreate what main() does, minus argparse, with a hand-rolled call.
     import importlib
 
-    rv = importlib.import_module("replay_validate")
+    rv = importlib.import_module("scripts.replay_validate")
     verifier = rv.VERIFIER_REGISTRY["trust_spre"](None)
 
     shigh: list = []

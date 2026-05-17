@@ -35,9 +35,17 @@ model:
   noise_scheduler:
     type: ddpm
     num_train_timesteps: 1000
-    num_inference_timesteps: 5     # DPMSolver++ at inference
+    # DPMSolver++ at inference. 5 steps is the same setting used to produce the
+    # numbers in Tab. I/II/III; see README "Inference / Deployment" for the
+    # rationale and the trade-off vs. quality.
+    num_inference_timesteps: 5
     beta_schedule: squaredcos_cap_v2
-    prediction_type: sample
+    # Paper §III-C: "The model predicts the action noise \hat{eps}_theta,
+    # thereby yielding the predicted action sequence \hat{a}_{t:t+L-1}."
+    # We therefore use noise (epsilon) prediction during training. Older
+    # checkpoints (released as `sample` for legacy reasons) keep working
+    # because RDTRunner / compute_logpi.py handle both branches.
+    prediction_type: epsilon
     clip_sample: False
   ema:
     update_after_step: 0

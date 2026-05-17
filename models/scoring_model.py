@@ -9,13 +9,34 @@ from models.rdt.blocks import RDTBlock, TimestepEmbedder, get_multimodal_cond_po
 
 class ScoringModel(nn.Module):
     """
-    Scoring model that takes state, action chunks, and logpi as input
+    Scoring model that takes state, action chunks, and \\hat{log pi}_t as input
     and outputs a 0-1 score for episode quality assessment.
 
-    Used for Positive-Unlabeled (PU) learning to distinguish expert vs non-expert
-    episodes (Dexora §III-C). Tokens fed to the transformer follow the paper:
+    Used for Positive-Unlabeled (PU) learning to distinguish expert vs
+    non-expert episodes (Dexora §III-C). Tokens fed to the transformer follow
+    the paper:
+
         [s_t ; a_{t:t+L-1} ; \\hat{log pi}_t]
+
     while language + multi-view image tokens form a separate condition stream.
+
+    Implementation note about the log-pi token
+    -----------------------------------------
+    The paper treats \\hat{log pi}_t as a single scalar that becomes one token
+    after a learned projection. Because the scalar's dynamic range is bounded
+    (it is the z-scored denoising residual energy, see ``compute_logpi.py``)
+    we project it through a small **sinusoidal positional-style encoding**
+    before the linear layer:
+
+        x -> [x, sin(2^0 pi x), cos(2^0 pi x), ..., sin(2^{F-1} pi x), cos(...)]
+          -> Linear(2F + 1 -> hidden_size)
+
+    This is mathematically equivalent to "a single learned linear projection
+    of \\hat{log pi}_t" in expressivity (the linear layer can collapse the
+    extra frequencies to zero) but in practice it makes the model much more
+    robust to bf16 underflow on near-zero scores and helps the network pick
+    up small differences between high-quality and low-quality clips. We use
+    ``F = 8`` frequency bands and keep the raw input as the first feature.
     """
 
     def __init__(
